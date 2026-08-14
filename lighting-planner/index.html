@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>照明配置プランナー | TOTE AI TOOLS</title>
+<meta name="description" content="建物形状・器具配置・照射方向・照度分布まで扱う照明配置プランナーは準備中です。現在公開中の簡易版「照明台数 概算ツール β」もあわせてご利用ください。">
+<meta name="robots" content="noindex">
+<meta property="og:type" content="website">
+<meta property="og:title" content="照明配置プランナー | TOTE AI TOOLS">
+<meta property="og:description" content="建物形状・器具配置・照射方向・照度分布まで扱う照明配置プランナーは準備中です。">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0b1618">
+<!--
+  照明配置プランナー（準備中ページ）
+  TOTE AI TOOLS / https://tote-tools.com/lighting-planner/
+  詳細版（建物形状・器具配置・照射方向・照度分布・JSON保存・PDF印刷）は準備中。
+  現在公開中の簡易版は /lighting-count/。
+-->
+<style>
+:root{
+  --bg:#0b1618;
+  --bg-soft:#0e1e21;
+  --panel:#122428;
+  --panel-2:#0f2124;
+  --line:#1e3a3f;
+  --line-2:#2b4d53;
+  --text:#e3efee;
+  --text-2:#a6c0c1;
+  --muted:#7e999b;
+  --teal:#2dd4bf;
+  --teal-2:#14b8a6;
+  --teal-deep:#0d3a3d;
+  --mono:ui-monospace,"SFMono-Regular",Consolas,"Roboto Mono","Noto Sans Mono",monospace;
+  --sans:"Hiragino Kaku Gothic ProN","Yu Gothic UI","Noto Sans JP",Meiryo,system-ui,sans-serif;
+  --r:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html{-webkit-text-size-adjust:100%;}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--sans);
+  font-size:16px;
+  line-height:1.7;
+  min-height:100svh;
+  display:flex;
+  flex-direction:column;
+}
+a{color:var(--teal);}
+:focus-visible{outline:2px solid var(--teal);outline-offset:2px;border-radius:4px;}
+
+.site{
+  border-bottom:1px solid var(--line);
+  background:linear-gradient(180deg,#0d1f22,#0b1618);
+}
+.site-in{max-width:720px;margin:0 auto;padding:14px 18px 22px;}
+.brand{
+  display:inline-block;font-size:12px;letter-spacing:.18em;color:var(--muted);
+  text-decoration:none;font-weight:600;
+}
+.brand:hover{color:var(--teal);}
+.title-row{display:flex;align-items:baseline;flex-wrap:wrap;gap:10px;margin-top:14px;}
+h1{font-size:clamp(23px,6vw,32px);line-height:1.25;letter-spacing:.01em;font-weight:700;}
+.soon{
+  font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:.1em;
+  color:#052b28;background:var(--teal);padding:3px 9px;border-radius:999px;
+  transform:translateY(-3px);
+}
+
+main{max-width:720px;margin:0 auto;padding:34px 18px 40px;flex:1;width:100%;}
+.card{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  padding:24px 22px;
+}
+.lede{color:var(--text-2);font-size:15px;line-height:1.85;}
+.lede + .lede{margin-top:10px;}
+
+.linkbox{
+  margin-top:22px;padding-top:20px;border-top:1px solid var(--line);
+}
+.linkbox .label{
+  font-size:11.5px;letter-spacing:.14em;color:var(--muted);margin-bottom:10px;
+}
+.toollink{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  border:1px solid var(--line-2);border-radius:8px;
+  padding:14px 16px;text-decoration:none;
+  background:var(--panel-2);
+  transition:border-color .2s,background .2s;
+}
+.toollink:hover{border-color:var(--teal-2);background:var(--teal-deep);}
+.toollink .name{color:var(--text);font-weight:600;font-size:15px;}
+.toollink .go{color:var(--teal);font-family:var(--mono);font-size:14px;white-space:nowrap;}
+
+footer{
+  max-width:720px;margin:0 auto;padding:0 18px 40px;color:var(--muted);font-size:12.5px;
+}
+footer a{text-decoration:none;}
+
+@media(prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important;}}
+</style>
+</head>
+<body>
+
+<div class="site">
+  <div class="site-in">
+    <a class="brand" href="/">TOTE AI TOOLS</a>
+    <div class="title-row">
+      <h1>照明配置プランナー</h1>
+      <span class="soon">準備中</span>
+    </div>
+  </div>
+</div>
+
+<main>
+  <div class="card">
+    <p class="lede">照明配置・照度分布まで扱う詳細版は準備中です。</p>
+    <p class="lede">現在公開中の簡易版はこちら。</p>
+
+    <div class="linkbox">
+      <p class="label">公開中の簡易版</p>
+      <a class="toollink" href="https://tote-tools.com/lighting-count/">
+        <span class="name">照明台数 概算ツール β</span>
+        <span class="go">tote-tools.com/lighting-count/ ›</span>
+      </a>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <a href="/">← TOTE AI TOOLS トップへ戻る</a>
+</footer>
+
+</body>
+</html>

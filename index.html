@@ -144,8 +144,9 @@
 
   /* 準備中 */
   .grid{display:grid;gap:12px;grid-template-columns:1fr}
-  .tile{border:1px solid var(--line);border-radius:16px;background:var(--glass);padding:20px 18px;transition:border-color .3s,background .3s}
+  .tile{display:block;border:1px solid var(--line);border-radius:16px;background:var(--glass);padding:20px 18px;transition:border-color .3s,background .3s;text-decoration:none;color:inherit}
   .tile:hover{border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.06)}
+  a.tile:hover{border-color:var(--teal)}
   .tile .soon{
     display:inline-block;margin-bottom:10px;font-size:10px;font-weight:600;letter-spacing:.16em;
     color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:3px 9px;
@@ -241,11 +242,11 @@
           <h3>GOLD LOT CALC</h3>
           <p>許容リスクからロットを計算する、トレード用の小さな計算機。</p>
         </div>
-        <div class="tile">
-          <span class="soon">SOON</span>
-          <h3>照明プランナー β版</h3>
-          <p>部屋サイズと必要照度から、照明台数の概算を検討するツール。</p>
-        </div>
+        <a class="tile" href="https://tote-tools.com/lighting-count/">
+          <span class="soon">BETA</span>
+          <h3>照明台数 概算ツール β</h3>
+          <p>部屋サイズと必要照度から、照明台数の目安を確認する簡易ツール。</p>
+        </a>
         <div class="tile">
           <span class="soon">SOON</span>
           <h3>コトババ・スロット 電気工事編</h3>
