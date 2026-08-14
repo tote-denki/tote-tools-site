@@ -1,13 +1,201 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TOTE AI TOOLS</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>TOTE AI TOOLS</title>
+
+<meta property="og:title" content="TOTE AI TOOLS">
+<meta property="og:description" content="AIで作る、小さなWebツール置き場。">
+<meta property="og:url" content="https://tote-tools.com/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="TOTE AI TOOLS">
+<meta name="twitter:description" content="AIで作る、小さなWebツール置き場。">
+
+<style>
+  :root{
+    color-scheme:light;
+    --bg:#F7F6F3;
+    --bg-accent1:rgba(90,80,230,.10);
+    --bg-accent2:rgba(230,90,150,.08);
+    --fg:#1E1B2E;
+    --muted:#6B6478;
+    --card-bg:#FFFFFF;
+    --card-bd:#E7E3F0;
+    --card-shadow:0 10px 30px rgba(40,30,80,.08);
+    --accent:#5B4FE0;
+    --accent-hi:#7A6FF5;
+    --btn-fg:#FFFFFF;
+    --btn2-bg:#FFFFFF;
+    --btn2-fg:#5B4FE0;
+    --btn2-bd:#D8D2F0;
+    --pill-bg:#F0EEFA;
+    --pill-fg:#5B4FE0;
+    --soon-bd:#E7E3F0;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      color-scheme:dark;
+      --bg:#131120;
+      --bg-accent1:rgba(122,111,245,.16);
+      --bg-accent2:rgba(230,90,150,.10);
+      --fg:#EFEDFB;
+      --muted:#A29CB8;
+      --card-bg:#1B1830;
+      --card-bd:#2C2748;
+      --card-shadow:0 10px 30px rgba(0,0,0,.35);
+      --accent:#8A7FFA;
+      --accent-hi:#A79DFF;
+      --btn-fg:#161327;
+      --btn2-bg:#1B1830;
+      --btn2-fg:#A79DFF;
+      --btn2-bd:#3A3460;
+      --pill-bg:#241F3D;
+      --pill-fg:#A79DFF;
+      --soon-bd:#2C2748;
+    }
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{background:var(--bg)}
+  body{
+    min-height:100dvh;
+    background:var(--bg);
+    background-image:
+      radial-gradient(120% 70% at 15% -10%, var(--bg-accent1), transparent 60%),
+      radial-gradient(100% 60% at 100% 10%, var(--bg-accent2), transparent 60%);
+    color:var(--fg);
+    font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    display:flex;flex-direction:column;align-items:center;
+    padding:56px 20px 40px;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .wrap{width:100%;max-width:720px;display:flex;flex-direction:column;gap:44px}
+
+  header{text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center}
+  .logo{
+    font-size:13px;font-weight:700;letter-spacing:.32em;text-indent:.32em;
+    color:var(--accent);
+  }
+  h1{
+    font-size:clamp(28px,6vw,40px);
+    font-weight:800;letter-spacing:.02em;line-height:1.25;
+  }
+  .tagline{color:var(--muted);font-size:clamp(14px,3.2vw,17px);line-height:1.7}
+
+  section{width:100%;display:flex;flex-direction:column;gap:16px}
+  .section-title{
+    font-size:12px;font-weight:700;letter-spacing:.18em;text-indent:.1em;
+    color:var(--muted);
+  }
+
+  .card{
+    background:var(--card-bg);
+    border:1px solid var(--card-bd);
+    border-radius:18px;
+    box-shadow:var(--card-shadow);
+    padding:28px;
+    display:flex;flex-direction:column;gap:14px;
+  }
+  .card-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .card-title{font-size:20px;font-weight:800}
+  .badge{
+    font-size:11px;font-weight:700;letter-spacing:.08em;
+    background:var(--pill-bg);color:var(--pill-fg);
+    border-radius:999px;padding:4px 11px;white-space:nowrap;
+  }
+  .card-desc{color:var(--muted);font-size:14.5px;line-height:1.8}
+
+  .card-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;
+    font-size:14.5px;font-weight:700;letter-spacing:.02em;
+    padding:12px 22px;border-radius:11px;text-decoration:none;
+    transition:transform .15s ease,filter .15s ease,background .15s ease;
+    border:1px solid transparent;
+  }
+  .btn:active{transform:translateY(1px)}
+  .btn-primary{
+    background:linear-gradient(180deg,var(--accent-hi),var(--accent));
+    color:var(--btn-fg);
+    box-shadow:0 8px 18px rgba(91,79,224,.30);
+  }
+  .btn-primary:hover{filter:brightness(1.05)}
+  .btn-secondary{
+    background:var(--btn2-bg);
+    color:var(--btn2-fg);
+    border-color:var(--btn2-bd);
+  }
+  .btn-secondary:hover{border-color:var(--accent)}
+
+  .soon{
+    display:flex;flex-direction:column;gap:8px;
+    border:1px dashed var(--soon-bd);
+    border-radius:14px;
+    padding:16px 20px;
+  }
+  .soon-item{
+    display:flex;align-items:baseline;gap:10px;
+    font-size:13.5px;color:var(--muted);
+  }
+  .soon-item::before{
+    content:"";width:5px;height:5px;border-radius:50%;
+    background:var(--muted);flex:none;
+    align-self:center;
+  }
+
+  footer{
+    margin-top:8px;text-align:center;
+    color:var(--muted);font-size:12.5px;
+  }
+
+  @media (max-width:480px){
+    body{padding:44px 16px 32px}
+    .card{padding:22px}
+    .card-actions{flex-direction:column}
+    .btn{width:100%}
+  }
+</style>
 </head>
 <body>
-  <h1>TOTE AI TOOLS</h1>
-  <p>小さなWebツール置き場です。</p>
-  <p><a href="./kotobaba-slot/">コトババ・スロット</a></p>
+<div class="wrap">
+
+  <header>
+    <div class="logo">TOTE AI TOOLS</div>
+    <h1>TOTE AI TOOLS</h1>
+    <p class="tagline">AIで作る、小さなWebツール置き場。</p>
+  </header>
+
+  <section>
+    <p class="section-title">公開中のツール</p>
+
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">コトババ・スロット</span>
+        <span class="badge">公開中</span>
+      </div>
+      <p class="card-desc">意味が通りそうで通らない日本語を作る、1億通りの言葉スロット。</p>
+      <div class="card-actions">
+        <a class="btn btn-primary" href="/kotobaba-slot/">ツールを開く</a>
+        <a class="btn btn-secondary" href="https://note.com/tote_ai_tools/n/nf24b01bcf14b" target="_blank" rel="noopener">note販売記事を見る</a>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="section-title">今後追加予定</p>
+    <div class="soon">
+      <p class="soon-item">GOLD LOT CALC</p>
+      <p class="soon-item">コトババ・スロット 電気工事編</p>
+      <p class="soon-item">業務支援ツール実験</p>
+    </div>
+  </section>
+
+  <footer>© 2026 TOTE AI TOOLS</footer>
+
+</div>
 </body>
 </html>
