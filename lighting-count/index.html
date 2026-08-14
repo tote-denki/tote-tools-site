@@ -5,16 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>照明台数 概算ツール β | TOTE AI TOOLS</title>
 <meta name="description" content="部屋の広さと必要照度から、照明器具のおおよその台数を光束法で概算します。ブラウザ内で完結。β版・概算検討用。">
-<link rel="canonical" href="https://tote-tools.com/lighting-planner/">
+<link rel="canonical" href="https://tote-tools.com/lighting-count/">
 <meta property="og:type" content="website">
 <meta property="og:title" content="照明台数 概算ツール β | TOTE AI TOOLS">
 <meta property="og:description" content="幅・奥行・必要照度から必要台数を概算。印刷対応。設計確定用ではなく概算検討用です。">
-<meta property="og:url" content="https://tote-tools.com/lighting-planner/">
+<meta property="og:url" content="https://tote-tools.com/lighting-count/">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#0b1618">
 <!--
   照明台数 概算ツール β  v0.1.0
-  TOTE AI TOOLS / https://tote-tools.com/lighting-planner/
+  TOTE AI TOOLS / https://tote-tools.com/lighting-count/
   光束法による概算のみ。逐点法・配光計算・照度分布は扱わない。
   単一ファイル完結・外部依存なし・入力はブラウザ内でのみ処理。
 -->
@@ -492,7 +492,7 @@ footer a{text-decoration:none;}
     実際の設計・施工では、器具仕様、配光、取付高さ、天井高さ、反射率、障害物、保守率、利用率、現場条件を確認してください。
     最終判断は設計者・施工者が行ってください。
   </div>
-  <div class="p-foot">照明台数 概算ツール β v0.1.0 ／ TOTE AI TOOLS ／ https://tote-tools.com/lighting-planner/</div>
+  <div class="p-foot">照明台数 概算ツール β v0.1.0 ／ TOTE AI TOOLS ／ https://tote-tools.com/lighting-count/</div>
 </div>
 
 <script>
@@ -842,7 +842,7 @@ function buildCopyText(r, planText, pitchTxt, comment){
   L.push("最終判断は設計者・施工者が行ってください。");
   L.push("");
   L.push("照明台数 概算ツール β " + VERSION + " / TOTE AI TOOLS");
-  L.push("https://tote-tools.com/lighting-planner/");
+  L.push("https://tote-tools.com/lighting-count/");
   $("copyText").value = L.join("\n");
 }
 
