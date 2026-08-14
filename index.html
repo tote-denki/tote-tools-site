@@ -1,201 +1,271 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#05080D">
 <title>TOTE AI TOOLS</title>
-
+<meta name="description" content="AIで作る、小さなWebツール置き場。言葉遊び、計算ツール、業務支援の実験を公開しています。">
 <meta property="og:title" content="TOTE AI TOOLS">
-<meta property="og:description" content="AIで作る、小さなWebツール置き場。">
-<meta property="og:url" content="https://tote-tools.com/">
+<meta property="og:description" content="AIで作る、小さなWebツール置き場。言葉遊び、計算ツール、業務支援の実験を公開しています。">
 <meta property="og:type" content="website">
-<meta name="twitter:card" content="summary">
+<meta property="og:url" content="https://tote-tools.com/">
+<meta property="og:site_name" content="TOTE AI TOOLS">
+<!-- トップページ用OGP画像を用意したら有効化する
+<meta property="og:image" content="https://tote-tools.com/ogp.png">
+-->
+<meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="TOTE AI TOOLS">
-<meta name="twitter:description" content="AIで作る、小さなWebツール置き場。">
-
+<meta name="twitter:description" content="AIで作る、小さなWebツール置き場。言葉遊び、計算ツール、業務支援の実験を公開しています。">
 <style>
   :root{
-    color-scheme:light;
-    --bg:#F7F6F3;
-    --bg-accent1:rgba(90,80,230,.10);
-    --bg-accent2:rgba(230,90,150,.08);
-    --fg:#1E1B2E;
-    --muted:#6B6478;
-    --card-bg:#FFFFFF;
-    --card-bd:#E7E3F0;
-    --card-shadow:0 10px 30px rgba(40,30,80,.08);
-    --accent:#5B4FE0;
-    --accent-hi:#7A6FF5;
-    --btn-fg:#FFFFFF;
-    --btn2-bg:#FFFFFF;
-    --btn2-fg:#5B4FE0;
-    --btn2-bd:#D8D2F0;
-    --pill-bg:#F0EEFA;
-    --pill-fg:#5B4FE0;
-    --soon-bd:#E7E3F0;
-  }
-  @media (prefers-color-scheme: dark){
-    :root{
-      color-scheme:dark;
-      --bg:#131120;
-      --bg-accent1:rgba(122,111,245,.16);
-      --bg-accent2:rgba(230,90,150,.10);
-      --fg:#EFEDFB;
-      --muted:#A29CB8;
-      --card-bg:#1B1830;
-      --card-bd:#2C2748;
-      --card-shadow:0 10px 30px rgba(0,0,0,.35);
-      --accent:#8A7FFA;
-      --accent-hi:#A79DFF;
-      --btn-fg:#161327;
-      --btn2-bg:#1B1830;
-      --btn2-fg:#A79DFF;
-      --btn2-bd:#3A3460;
-      --pill-bg:#241F3D;
-      --pill-fg:#A79DFF;
-      --soon-bd:#2C2748;
-    }
+    --bg:#05080D;
+    --ink:#F5F7FA;
+    --muted:#8C98A4;
+    --line:rgba(255,255,255,.10);
+    --glass:rgba(255,255,255,.045);
+    --teal:#2FE3C2;
+
+    --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Helvetica Neue",
+           "Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
+    --gutter:20px;
+    --maxw:1020px;
   }
 
-  *{box-sizing:border-box;margin:0;padding:0}
-  html{background:var(--bg)}
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
   body{
-    min-height:100dvh;
-    background:var(--bg);
-    background-image:
-      radial-gradient(120% 70% at 15% -10%, var(--bg-accent1), transparent 60%),
-      radial-gradient(100% 60% at 100% 10%, var(--bg-accent2), transparent 60%);
-    color:var(--fg);
-    font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-    display:flex;flex-direction:column;align-items:center;
-    padding:56px 20px 40px;
-    -webkit-font-smoothing:antialiased;
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:var(--font);line-height:1.6;
+    -webkit-font-smoothing:antialiased;overflow-x:hidden;
+  }
+  a{color:inherit;text-decoration:none}
+  img{max-width:100%;display:block}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 var(--gutter)}
+
+  /* ── ナビ ───────────────────────── */
+  .nav{
+    position:sticky;top:0;z-index:50;
+    background:rgba(5,8,13,.72);
+    backdrop-filter:saturate(180%) blur(20px);
+    -webkit-backdrop-filter:saturate(180%) blur(20px);
+    border-bottom:1px solid var(--line);
+  }
+  .nav .wrap{height:46px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+  .brand{display:flex;align-items:center;gap:9px}
+  .brand svg{width:18px;height:18px;flex:none}
+  .brand span{font-size:13.5px;font-weight:600;letter-spacing:.14em}
+  .nav-links{display:flex;gap:18px}
+  .nav-links a{font-size:12.5px;color:var(--muted);transition:color .2s}
+  .nav-links a:hover{color:var(--ink)}
+
+  /* ── ヒーロー ───────────────────── */
+  .hero{position:relative;text-align:center;padding:52px 0 34px;overflow:hidden}
+  .hero::before{
+    content:"";position:absolute;left:50%;top:-320px;
+    width:1000px;height:660px;transform:translateX(-50%);
+    background:radial-gradient(ellipse at center,rgba(47,227,194,.15),rgba(47,227,194,.05) 42%,transparent 68%);
+    pointer-events:none;
+  }
+  .hero .wrap{position:relative}
+  .logo{width:52px;height:52px;margin:0 auto 20px;filter:drop-shadow(0 8px 26px rgba(47,227,194,.26))}
+  h1{margin:0;font-size:clamp(32px,8vw,58px);line-height:1.15;font-weight:700;letter-spacing:-.02em}
+  h1 .grad{
+    background:linear-gradient(100deg,#7CF5DC 0%,var(--teal) 42%,#3AA8FF 100%);
+    -webkit-background-clip:text;background-clip:text;
+    -webkit-text-fill-color:transparent;color:transparent;
+  }
+  .sub{margin:16px auto 0;max-width:26em;font-size:clamp(14.5px,3.9vw,17px);color:var(--muted);line-height:1.7}
+
+  .chips{
+    margin:22px 0 0;padding:0;list-style:none;
+    display:flex;justify-content:center;flex-wrap:wrap;gap:8px;
+  }
+  .chips li{
+    font-size:12px;letter-spacing:.02em;color:var(--muted);
+    border:1px solid var(--line);border-radius:999px;
+    padding:5px 12px;background:var(--glass);
+    display:flex;align-items:center;gap:6px;
+  }
+  .chips li::before{
+    content:"";width:4px;height:4px;border-radius:50%;background:var(--teal);opacity:.85;
   }
 
-  .wrap{width:100%;max-width:720px;display:flex;flex-direction:column;gap:44px}
-
-  header{text-align:center;display:flex;flex-direction:column;gap:14px;align-items:center}
-  .logo{
-    font-size:13px;font-weight:700;letter-spacing:.32em;text-indent:.32em;
-    color:var(--accent);
-  }
-  h1{
-    font-size:clamp(28px,6vw,40px);
-    font-weight:800;letter-spacing:.02em;line-height:1.25;
-  }
-  .tagline{color:var(--muted);font-size:clamp(14px,3.2vw,17px);line-height:1.7}
-
-  section{width:100%;display:flex;flex-direction:column;gap:16px}
-  .section-title{
-    font-size:12px;font-weight:700;letter-spacing:.18em;text-indent:.1em;
-    color:var(--muted);
+  /* ── セクション ─────────────────── */
+  section{padding:34px 0}
+  .sec-label{
+    margin:0 0 16px;text-align:center;
+    font-size:11.5px;font-weight:600;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--muted);
   }
 
-  .card{
-    background:var(--card-bg);
-    border:1px solid var(--card-bd);
-    border-radius:18px;
-    box-shadow:var(--card-shadow);
-    padding:28px;
-    display:flex;flex-direction:column;gap:14px;
+  /* 公開中カード */
+  .feature{
+    position:relative;border-radius:22px;overflow:hidden;
+    border:1px solid var(--line);
+    background:
+      radial-gradient(120% 130% at 50% 0%,rgba(47,227,194,.13),transparent 58%),
+      linear-gradient(180deg,#0A1A22 0%,#070E15 100%);
   }
-  .card-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .card-title{font-size:20px;font-weight:800}
+  .thumb{
+    position:relative;aspect-ratio:1200/630;background:#060B11;
+    border-bottom:1px solid var(--line);
+  }
+  .thumb img{width:100%;height:100%;object-fit:cover}
+  .thumb::after{
+    content:"";position:absolute;inset:0;
+    background:linear-gradient(180deg,transparent 55%,rgba(7,14,21,.85) 100%);
+    pointer-events:none;
+  }
+  .f-body{padding:24px 20px 26px;text-align:center}
   .badge{
-    font-size:11px;font-weight:700;letter-spacing:.08em;
-    background:var(--pill-bg);color:var(--pill-fg);
-    border-radius:999px;padding:4px 11px;white-space:nowrap;
+    display:inline-flex;align-items:center;gap:7px;
+    font-size:11px;font-weight:600;letter-spacing:.14em;color:var(--teal);
+    border:1px solid rgba(47,227,194,.34);border-radius:999px;padding:4px 12px;margin-bottom:14px;
   }
-  .card-desc{color:var(--muted);font-size:14.5px;line-height:1.8}
+  .badge i{width:5px;height:5px;border-radius:50%;background:var(--teal);box-shadow:0 0 0 3px rgba(47,227,194,.18)}
+  .feature h2{margin:0;font-size:clamp(24px,6.4vw,36px);font-weight:700;letter-spacing:-.015em;line-height:1.3}
+  .feature p{margin:12px auto 0;max-width:28em;font-size:15px;color:var(--muted)}
 
-  .card-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}
   .btn{
-    display:inline-flex;align-items:center;justify-content:center;
-    font-size:14.5px;font-weight:700;letter-spacing:.02em;
-    padding:12px 22px;border-radius:11px;text-decoration:none;
-    transition:transform .15s ease,filter .15s ease,background .15s ease;
-    border:1px solid transparent;
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    margin-top:20px;width:100%;max-width:340px;
+    padding:15px 24px;border-radius:14px;
+    background:linear-gradient(180deg,#38EFCC,#12B39C);
+    color:#03211C;font-size:16px;font-weight:700;letter-spacing:.01em;
+    box-shadow:0 10px 30px -12px rgba(47,227,194,.6);
+    transition:transform .2s,box-shadow .2s,filter .2s;
   }
-  .btn:active{transform:translateY(1px)}
-  .btn-primary{
-    background:linear-gradient(180deg,var(--accent-hi),var(--accent));
-    color:var(--btn-fg);
-    box-shadow:0 8px 18px rgba(91,79,224,.30);
-  }
-  .btn-primary:hover{filter:brightness(1.05)}
-  .btn-secondary{
-    background:var(--btn2-bg);
-    color:var(--btn2-fg);
-    border-color:var(--btn2-bd);
-  }
-  .btn-secondary:hover{border-color:var(--accent)}
+  .btn em{font-style:normal;transition:transform .2s}
+  .btn:hover{transform:translateY(-1px);filter:brightness(1.05);box-shadow:0 14px 34px -12px rgba(47,227,194,.7)}
+  .btn:hover em{transform:translateX(3px)}
+  .note-hint{margin:12px 0 0;font-size:12.5px;color:rgba(255,255,255,.4);line-height:1.6}
 
-  .soon{
-    display:flex;flex-direction:column;gap:8px;
-    border:1px dashed var(--soon-bd);
-    border-radius:14px;
-    padding:16px 20px;
+  /* 準備中 */
+  .grid{display:grid;gap:12px;grid-template-columns:1fr}
+  .tile{border:1px solid var(--line);border-radius:16px;background:var(--glass);padding:20px 18px;transition:border-color .3s,background .3s}
+  .tile:hover{border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.06)}
+  .tile .soon{
+    display:inline-block;margin-bottom:10px;font-size:10px;font-weight:600;letter-spacing:.16em;
+    color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:3px 9px;
   }
-  .soon-item{
-    display:flex;align-items:baseline;gap:10px;
-    font-size:13.5px;color:var(--muted);
-  }
-  .soon-item::before{
-    content:"";width:5px;height:5px;border-radius:50%;
-    background:var(--muted);flex:none;
-    align-self:center;
-  }
+  .tile h3{margin:0;font-size:17px;font-weight:600;letter-spacing:-.01em}
+  .tile p{margin:7px 0 0;font-size:14px;color:var(--muted);line-height:1.65}
 
-  footer{
-    margin-top:8px;text-align:center;
-    color:var(--muted);font-size:12.5px;
-  }
+  /* ── フッター ───────────────────── */
+  footer{border-top:1px solid var(--line);padding:30px 0 calc(38px + env(safe-area-inset-bottom));text-align:center;margin-top:14px}
+  .f-links{display:flex;justify-content:center;gap:24px;flex-wrap:wrap;margin:0 0 16px}
+  .f-links a{font-size:14px;color:var(--muted);transition:color .2s}
+  .f-links a:hover{color:var(--ink)}
+  .copy{margin:0;font-size:12px;color:rgba(255,255,255,.34);letter-spacing:.04em}
 
-  @media (max-width:480px){
-    body{padding:44px 16px 32px}
-    .card{padding:22px}
-    .card-actions{flex-direction:column}
-    .btn{width:100%}
+  a:focus-visible{outline:2px solid var(--teal);outline-offset:3px;border-radius:10px}
+
+  @media (min-width:700px){
+    :root{--gutter:32px}
+    .hero{padding:72px 0 44px}
+    section{padding:40px 0}
+    .feature{border-radius:26px}
+    .f-body{padding:34px 40px 38px}
+    .grid{grid-template-columns:repeat(3,1fr);gap:16px}
+    .tile{padding:24px 22px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto}
+    *{transition:none!important;animation:none!important}
   }
 </style>
 </head>
 <body>
-<div class="wrap">
 
-  <header>
-    <div class="logo">TOTE AI TOOLS</div>
-    <h1>TOTE AI TOOLS</h1>
-    <p class="tagline">AIで作る、小さなWebツール置き場。</p>
-  </header>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="/">
+      <svg viewBox="0 0 40 44" aria-hidden="true">
+        <path d="M20 1.5 38 11.8v20.4L20 42.5 2 32.2V11.8Z" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="2.2"/>
+        <path d="M20 12v20M20 12l-8 4.6M20 12l8 4.6" stroke="#2FE3C2" stroke-width="3.4" stroke-linecap="round" fill="none"/>
+      </svg>
+      <span>TOTE AI TOOLS</span>
+    </a>
+    <nav class="nav-links">
+      <a href="https://note.com/tote_ai_tools" target="_blank" rel="noopener">note</a>
+      <a href="https://x.com/tote_ai_tools" target="_blank" rel="noopener">X</a>
+    </nav>
+  </div>
+</header>
 
-  <section>
-    <p class="section-title">公開中のツール</p>
+<main>
 
-    <div class="card">
-      <div class="card-head">
-        <span class="card-title">コトババ・スロット</span>
-        <span class="badge">公開中</span>
-      </div>
-      <p class="card-desc">意味が通りそうで通らない日本語を作る、1億通りの言葉スロット。</p>
-      <div class="card-actions">
-        <a class="btn btn-primary" href="/kotobaba-slot/">ツールを開く</a>
-        <a class="btn btn-secondary" href="https://note.com/tote_ai_tools/n/nf24b01bcf14b" target="_blank" rel="noopener">note販売記事を見る</a>
-      </div>
+  <section class="hero">
+    <div class="wrap">
+      <svg class="logo" viewBox="0 0 40 44" aria-label="TOTE AI TOOLS">
+        <path d="M20 1.5 38 11.8v20.4L20 42.5 2 32.2V11.8Z" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="1.8"/>
+        <path d="M20 12v20M20 12l-8 4.6M20 12l8 4.6" stroke="#2FE3C2" stroke-width="3" stroke-linecap="round" fill="none"/>
+      </svg>
+      <h1>AIで作る、<br><span class="grad">小さなWebツール。</span></h1>
+      <p class="sub">言葉遊び、計算ツール、業務支援。小さな実験を公開しています。</p>
+      <ul class="chips">
+        <li>ブラウザで動く</li>
+        <li>インストール不要</li>
+        <li>noteで公開中</li>
+      </ul>
     </div>
   </section>
 
   <section>
-    <p class="section-title">今後追加予定</p>
-    <div class="soon">
-      <p class="soon-item">GOLD LOT CALC</p>
-      <p class="soon-item">コトババ・スロット 電気工事編</p>
-      <p class="soon-item">業務支援ツール実験</p>
+    <div class="wrap">
+      <p class="sec-label">公開中</p>
+
+      <article class="feature">
+        <div class="thumb">
+          <img src="/kotobaba-slot/ogp.png" alt="コトババ・スロット" loading="lazy" decoding="async" width="1200" height="630">
+        </div>
+        <div class="f-body">
+          <span class="badge"><i></i>NOW LIVE</span>
+          <h2>コトババ・スロット</h2>
+          <p>意味が通りそうで通らない日本語をつくる、1億通りの言葉スロット。</p>
+          <a class="btn" href="https://note.com/tote_ai_tools/n/nf24b01bcf14b" target="_blank" rel="noopener">note販売記事を見る <em>›</em></a>
+          <p class="note-hint">購入後、記事内のURLからブラウザで遊べます。</p>
+        </div>
+      </article>
     </div>
   </section>
 
-  <footer>© 2026 TOTE AI TOOLS</footer>
+  <section>
+    <div class="wrap">
+      <p class="sec-label">準備中</p>
+      <div class="grid">
+        <div class="tile">
+          <span class="soon">SOON</span>
+          <h3>GOLD LOT CALC</h3>
+          <p>許容リスクからロットを計算する、トレード用の小さな計算機。</p>
+        </div>
+        <div class="tile">
+          <span class="soon">SOON</span>
+          <h3>照明プランナー β版</h3>
+          <p>部屋サイズと必要照度から、照明台数の概算を検討するツール。</p>
+        </div>
+        <div class="tile">
+          <span class="soon">SOON</span>
+          <h3>コトババ・スロット 電気工事編</h3>
+          <p>現場用語だけでまわす、業界内輪向けの言葉スロット。</p>
+        </div>
+      </div>
+    </div>
+  </section>
 
-</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="f-links">
+      <a href="https://note.com/tote_ai_tools" target="_blank" rel="noopener">note</a>
+      <a href="https://x.com/tote_ai_tools" target="_blank" rel="noopener">X</a>
+    </div>
+    <p class="copy">© 2026 TOTE AI TOOLS</p>
+  </div>
+</footer>
+
 </body>
 </html>
