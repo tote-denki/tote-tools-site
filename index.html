@@ -54,7 +54,7 @@
   }
   .nav .wrap{height:46px;display:flex;align-items:center;justify-content:space-between;gap:16px}
   .brand{display:flex;align-items:center;gap:9px}
-  .brand svg{width:18px;height:18px;flex:none}
+  .brand img{width:18px;height:18px;flex:none;object-fit:contain}
   .brand span{font-size:13.5px;font-weight:600;letter-spacing:.14em}
   .nav-links{display:flex;gap:18px}
   .nav-links a{font-size:12.5px;color:var(--muted);transition:color .2s}
@@ -69,7 +69,7 @@
     pointer-events:none;
   }
   .hero .wrap{position:relative}
-  .logo{width:52px;height:52px;margin:0 auto 20px;filter:drop-shadow(0 8px 26px rgba(47,227,194,.26))}
+  .logo{width:52px;height:52px;margin:0 auto 20px;object-fit:contain;filter:drop-shadow(0 8px 26px rgba(47,227,194,.26))}
   h1{margin:0;font-size:clamp(32px,8vw,58px);line-height:1.15;font-weight:700;letter-spacing:-.02em}
   h1 .grad{
     background:linear-gradient(100deg,#7CF5DC 0%,var(--teal) 42%,#3AA8FF 100%);
@@ -189,10 +189,7 @@
 <header class="nav">
   <div class="wrap">
     <a class="brand" href="/">
-      <svg viewBox="0 0 40 44" aria-hidden="true">
-        <path d="M20 1.5 38 11.8v20.4L20 42.5 2 32.2V11.8Z" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="2.2"/>
-        <path d="M20 12v20M20 12l-8 4.6M20 12l8 4.6" stroke="#2FE3C2" stroke-width="3.4" stroke-linecap="round" fill="none"/>
-      </svg>
+      <img src="/logo.png" alt="" width="18" height="18">
       <span>TOTE AI TOOLS</span>
     </a>
     <nav class="nav-links">
@@ -206,10 +203,7 @@
 
   <section class="hero">
     <div class="wrap">
-      <svg class="logo" viewBox="0 0 40 44" aria-label="TOTE AI TOOLS">
-        <path d="M20 1.5 38 11.8v20.4L20 42.5 2 32.2V11.8Z" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="1.8"/>
-        <path d="M20 12v20M20 12l-8 4.6M20 12l8 4.6" stroke="#2FE3C2" stroke-width="3" stroke-linecap="round" fill="none"/>
-      </svg>
+      <img class="logo" src="/logo.png" alt="TOTE AI TOOLS" width="52" height="52">
       <h1>AIで作る、<br><span class="grad">小さなWebツール。</span></h1>
       <p class="sub">言葉遊び、計算ツール、業務支援。小さな実験を公開しています。</p>
       <ul class="chips">
