@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>環撃軌道 ORBITAL REPRISAL β（1-1〜2-8）</title>
+<style>
+  :root{color-scheme:dark;background:#05070d}
+  *{box-sizing:border-box}
+  html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#05070d}
+  body{display:grid;place-items:center;font-family:"Yu Gothic UI","Meiryo",ui-monospace,monospace;color:#e9f7ff}
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 45%,#162744 0,#080d18 50%,#03050a 100%)}
+  #frame{position:relative;width:min(100vw,160vh);aspect-ratio:16/10;max-height:100vh;filter:drop-shadow(0 20px 50px #000)}
+  canvas{position:absolute;inset:0;width:100%;height:100%;background:#07101d;image-rendering:pixelated;outline:none;border:1px solid #23425b;box-shadow:inset 0 0 0 2px #050b13}
+  #sr{position:fixed;left:-9999px;width:1px;height:1px;overflow:hidden}
+  #boot{position:absolute;inset:0;display:grid;place-items:center;color:#87efff;letter-spacing:.25em;font-size:clamp(12px,2vw,20px);pointer-events:none}
+  .ready #boot{display:none}
+</style>
+</head>
+<body>
+<main id="frame">
+  <canvas id="game" width="1152" height="720" tabindex="0" aria-label="環撃軌道 ORBITAL REPRISAL。矢印またはWASDで移動、Zで時計回り、Xで反時計回りに周囲を公転させます。"></canvas>
+  <div id="boot">SYSTEM CHECK...</div>
+</main>
+<div id="sr" aria-live="polite"></div>
+<script>
+"use strict";
+
+/*
+  環撃軌道 ORBITAL REPRISAL
+  Core rule: orbit the eight cells around the player by 90 degrees. Positions
+  move, world-facing directions do not. Enemy shots become dangerous return
+  shots only after the player deliberately catches them in an orbit.
+
+  This file intentionally contains the complete game: deterministic simulation,
+  sixteen authored stages in this BETA build, procedural drawing, synthesized audio, gamepad support,
+  save data, menus, progression, grading, and self tests. No network resources.
+*/
+
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d",{alpha:false});
+const sr=document.getElementById("sr");
+ctx.imageSmoothingEnabled=false;
+
+const W=1152,H=720,COLS=15,ROWS=11,TILE=48,BOARD_X=48,BOARD_Y=132;
+const DIRS=[[0,-1],[1,0],[0,1],[-1,0]];
+const DIR_NAME=["N","E","S","W"];
+const RANK_VALUE={"-":0,C:1,B:2,A:3,S:4};
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const keyOf=(x,y)=>x+","+y;
+const eq=(a,b)=>a.x===b.x&&a.y===b.y;
+const cwPos=(dx,dy)=>[-dy,dx],ccwPos=(dx,dy)=>[dy,-dx];
+const HLine=(y,a,b)=>Array.from({length:b-a+1},(_,i)=>[a+i,y]);
+const VLine=(x,a,b)=>Array.from({length:b-a+1},(_,i)=>[x,a+i]);
+const Box=(x1,y1,x2,y2)=>{const a=[];for(let y=y1;y<=y2;y++)for(let x=x1;x<=x2;x++)a.push([x,y]);return a};
+const uniq=a=>[...new Map(a.map(v=>[v.join(","),v])).values()];
+
+let uid=1;
+let rngState=0x51f15e;
+function seedRng(n){rngState=(n*2654435761+0x9e3779b9)>>>0}
+function rand(){rngState^=rngState<<13;rngState^=rngState>>>17;rngState^=rngState<<5;return (rngState>>>0)/4294967296}
+
+const PALETTE={
+  bg:"#07101d",panel:"#0b1727",grid:"#17334a",floor:"#0c2131",floor2:"#10293a",
+  ink:"#ddf8ff",muted:"#7092a6",cyan:"#40efff",cyan2:"#0aa6ca",gold:"#ffd457",
+  red:"#ff496c",orange:"#ff8a45",violet:"#b66cff",green:"#68f0a5",white:"#f7ffff",
+  wall:"#29425a",wallHi:"#527594",pit:"#02040a",spark:"#ff4068"
+};
+
+function E(type,x,y,dir=0,extra={}){return {type,x,y,dir,...extra}}
+function O(type,x,y,dir=0,extra={}){return {type,x,y,dir,...extra}}
+
+const WORLDS=[
+  {name:"返環訓練区",sub:"危険を弾薬に変えろ",color:"#40efff"},
+  {name:"鏡潮区",sub:"位置と射線を分けて読め",color:"#7ce9a5"},
+  {name:"分岐回路",sub:"倒す順序が盤面を変える",color:"#ffd457"},
+  {name:"時律炉",sub:"数手後の瞬間を仕込め",color:"#ff8a60"},
+  {name:"零軸天守",sub:"既知の法則を逆利用せよ",color:"#d38aff"}
+];
+
+function stage(o){
+  return {id:0,world:0,name:"",intent:"",par:60,parRot:12,tech:"連鎖を作る",p:[7,7],exit:[7,1],
+    walls:[],pits:[],sparks:[],fragile:[],conveyors:[],nodes:[],gates:[],objects:[],enemies:[],...o};
+}
+
+// Every entry is authored. Helpers only abbreviate coordinate lists; no layout is random.
+const STAGES=[
+  stage({name:"最初の返球",intent:"赤弾を避けず、立ち位置と公転方向で敵のいるレーンへ移す。",par:38,parRot:6,tech:"RETURN弾だけで2体撃破",p:[7,7],exit:[7,2],pits:[[7,4]],enemies:[E("turret",2,5,1,{phase:0}),E("turret",12,4,3,{phase:30})]}),
+  stage({name:"上か、下か",intent:"CWとCCWで同じ弾の移動先が変わることを選ばせる。",par:42,parRot:8,tech:"CWとCCWを各1回使いノーダメージ",p:[7,5],exit:[7,1],walls:[...HLine(3,5,9),...HLine(7,5,9)],enemies:[E("turret",2,5,1),E("turret",12,4,3,{phase:20}),E("turret",12,6,3,{phase:45})]}),
+  stage({name:"獣を回せ",intent:"追跡獣そのものを穴または返弾レーンへ公転させる。",par:45,parRot:8,tech:"予告中のハウンドを穴へ落とす",p:[7,8],exit:[7,2],walls:[...HLine(3,3,5),...HLine(3,9,11)],pits:[[7,4],[7,6]],enemies:[E("turret",2,5,1),E("hound",9,5,3),E("turret",12,6,3,{phase:28})]}),
+  stage({name:"箱の影",intent:"箱を遮蔽として残すか、公転で射線を開くかを選ぶ。",par:52,parRot:10,tech:"箱を壊さずにクリア",p:[7,7],exit:[7,2],walls:[[4,3],[5,3],[9,3],[10,3]],objects:[O("crate",6,5),O("crate",8,5)],enemies:[E("turret",2,5,1),E("turret",12,5,3,{phase:30}),E("hound",7,2,2)]}),
+  stage({name:"金の二段返し",intent:"同じ弾を二度捕まえて金弾にし、並ぶ敵を貫く。",par:58,parRot:12,tech:"同じ金弾で2体を連続撃破",p:[7,8],exit:[7,1],walls:[...HLine(2,9,12),...HLine(7,9,12)],pits:[[10,4],[12,4]],enemies:[E("turret",2,5,1),E("hound",10,3,3),E("hound",12,3,3),E("turret",12,6,3,{phase:42})]}),
+  stage({name:"針穴",intent:"安全な公転中心が少ない盤面で、1回に複数対象を束ねる。",par:62,parRot:9,tech:"9回以内・空振りなし",p:[7,8],exit:[7,1],walls:[...HLine(3,1,5),...HLine(3,9,13),...HLine(7,1,5),...HLine(7,9,13)],pits:[[7,2]],objects:[O("crate",6,5)],enemies:[E("turret",2,5,1),E("turret",12,4,3,{phase:32}),E("hound",11,6,3)]}),
+  stage({name:"三拍子",intent:"別々の周期が重なる一瞬を待ち、1回の公転でまとめる。",par:66,parRot:12,tech:"2.5秒以内に3連鎖",p:[7,5],exit:[7,1],pits:[[6,3],[8,7]],enemies:[E("turret",2,4,1),E("turret",12,6,3,{phase:34}),E("hound",4,8,0),E("hound",7,2,2,{phase:18}),E("hound",10,8,0,{phase:36})]}),
+  stage({name:"四方転卓",intent:"四方の射線と穴を見て、次の公転中心へ先回りする総合試験。",par:76,parRot:16,tech:"N→E→S→Wの順で4体撃破",p:[7,5],exit:[7,5],walls:[...Box(4,2,5,3),...Box(9,2,10,3),...Box(4,7,5,8),...Box(9,7,10,8)],pits:[[3,5],[11,5],[7,3],[7,7]],objects:[O("crate",6,5)],enemies:[E("turret",2,5,1),E("turret",12,5,3,{phase:28}),E("turret",7,1,2,{phase:50}),E("hound",7,8,0)]}),
+
+  stage({name:"向きは残る",intent:"公転しても反射板の向きは世界に固定される。置く場所だけを変える。",par:52,parRot:10,tech:"同じ鏡の反射で2体撃破",p:[7,7],exit:[7,1],walls:[...HLine(6,9,12)],objects:[O("mirror",7,4,0)],enemies:[E("turret",2,5,1),E("turret",12,3,3,{phase:25}),E("hound",11,7,3)]}),
+  stage({name:"一秒後の足跡",intent:"予測爆弾の着地点を外すだけでなく、敵へ重ねて武器にする。",par:56,parRot:11,tech:"最初の予測爆弾で敵を撃破",p:[7,7],exit:[7,1],pits:[[5,6],[9,6]],enemies:[E("oracle",7,2,2),E("hound",3,4,1),E("hound",11,4,3)]}),
+  stage({name:"盾の背中",intent:"盾兵を位置だけ公転し、世界向きの背面へ返弾を通す。",par:60,parRot:12,tech:"穴を使わず背面RETURNで盾兵撃破",p:[7,6],exit:[7,1],walls:[...HLine(3,8,11)],pits:[[11,7]],objects:[O("mirror",7,4,0)],enemies:[E("turret",2,5,1),E("guard",10,4,3),E("turret",12,6,3,{phase:35})]}),
+  stage({name:"壁裏予報",intent:"爆弾の予測印を壁の向こうの敵へ運ぶ。",par:66,parRot:14,tech:"視線外のハウンドを爆破",p:[4,7],exit:[4,1],walls:[...HLine(5,7,12),...VLine(9,1,4)],objects:[O("mirror",6,6,1),O("mirror",8,4,0)],enemies:[E("oracle",11,2,2),E("turret",2,5,1),E("hound",11,7,0)]}),
+  stage({name:"十字の背中",intent:"片方の盾の背面を開く公転が、もう片方の正面を危険にする。",par:72,parRot:16,tech:"同じボレー中に盾兵2体撃破",p:[7,5],exit:[7,5],walls:[[3,5],[11,5]],objects:[O("mirror",6,4,1),O("mirror",8,4,0),O("mirror",6,6,0),O("mirror",8,6,1)],enemies:[E("turret",2,3,1),E("turret",12,7,3,{phase:28}),E("guard",7,2,2),E("guard",7,8,0)]}),
+  stage({name:"一枚三役",intent:"一枚の鏡を遮蔽・偏向・可動障害として使い回す。",par:76,parRot:13,tech:"鏡を1度だけ公転して金弾連鎖",p:[6,7],exit:[6,1],walls:[...VLine(9,2,3),...VLine(9,7,8),...HLine(3,3,5),...HLine(7,3,5)],objects:[O("mirror",7,5,0)],enemies:[E("turret",2,5,1),E("guard",11,4,3),E("oracle",11,6,3),E("hound",8,2,2)]}),
+  stage({name:"予報のダンス",intent:"移動で爆弾を誘導しながら、次の公転中心も確保する。",par:82,parRot:17,tech:"爆発2回を敵だけに当てる",p:[7,5],exit:[7,1],walls:[[3,4],[11,4]],pits:[[7,3]],objects:[O("mirror",5,5,1),O("mirror",9,5,0)],enemies:[E("oracle",2,2,1),E("oracle",12,2,3,{phase:34}),E("hound",4,8,0),E("hound",10,8,0),E("guard",7,7,0)]}),
+  stage({name:"プリズム風車",intent:"四方の射撃・盾・予測を中央の鏡配置で解く鏡潮総合試験。",par:92,parRot:20,tech:"開始方位N→E→S→W順に撃破",p:[7,5],exit:[7,5],walls:[[7,3],[7,7],[5,5],[9,5]],objects:[O("mirror",6,4,1),O("mirror",8,4,0),O("mirror",6,6,0),O("mirror",8,6,1)],enemies:[E("turret",2,5,1),E("turret",12,5,3,{phase:30}),E("oracle",7,2,2,{phase:16}),E("guard",7,8,0)]}),
+
+  stage({name:"割れた後が本番",intent:"分裂体をどこで割るか選び、二片を同時処理する。",par:60,parRot:12,tech:"分裂片を両方とも穴で処理",p:[7,7],exit:[7,1],walls:[...HLine(5,4,6),...HLine(5,9,11)],pits:[[10,2],[10,6]],enemies:[E("turret",2,4,1),E("splitter",10,3,3),E("turret",12,6,3,{phase:28})]}),
+  stage({name:"敵の増幅器",intent:"共鳴体が弾を増やす危険と、二方向の攻撃資源を同時に読む。",par:64,parRot:13,tech:"同じ複製元の弾で2体撃破",p:[7,7],exit:[7,1],walls:[...VLine(9,2,4),...VLine(9,6,8)],enemies:[E("turret",2,5,1),E("resonator",5,4,1),E("hound",5,1,2),E("hound",5,8,0),E("turret",12,5,3,{phase:30})]}),
+  stage({name:"増幅してから割る",intent:"危険な共鳴体を残し、増やした返弾で分裂後を一掃する順序問題。",par:76,parRot:16,tech:"共鳴体を最後に倒し4片を連鎖",p:[7,7],exit:[7,1],walls:[[8,3],[8,7]],pits:[[4,2],[6,2],[10,3],[10,7]],enemies:[E("turret",2,5,1),E("resonator",5,4,1),E("splitter",5,2,2),E("splitter",10,5,3),E("turret",12,7,3,{phase:36})]}),
+  stage({name:"導通門",intent:"返弾でノードを点灯し、開いた門の射線を次の武器にする。",par:68,parRot:14,tech:"敵を倒す前に全ノード点灯",p:[5,7],exit:[12,5],walls:[...VLine(9,1,4),...VLine(9,6,9)],nodes:[[7,4]],gates:[[9,5]],objects:[O("crate",6,5)],enemies:[E("turret",2,5,1),E("hound",11,3,2),E("turret",12,7,3,{phase:40})]}),
+  stage({name:"開けると撃たれる",intent:"門を開いた瞬間に増える危険と、その新射線を使う利益を同時に読む。",par:78,parRot:16,tech:"開門後10秒以内に全滅",p:[7,7],exit:[12,5],walls:[...VLine(9,1,2),...VLine(9,4,9)],nodes:[[7,5]],gates:[[9,3]],objects:[O("mirror",8,6,1),O("crate",6,5)],enemies:[E("turret",2,3,1),E("resonator",11,3,3),E("splitter",11,7,0)]}),
+  stage({name:"二灯一射",intent:"一発の金弾を二つのノードへ回し、門の向こうの射手を残して利用する。",par:84,parRot:15,tech:"同一弾で2ノード点灯",p:[7,5],exit:[7,1],walls:[...HLine(3,1,6),...HLine(3,8,13),...HLine(7,1,6),...HLine(7,8,13)],nodes:[[6,4],[8,6]],gates:[[7,3],[7,7]],enemies:[E("turret",7,1,2),E("guard",7,8,0),E("resonator",12,5,3)]}),
+  stage({name:"枝弾の群れ",intent:"増えた弾と分裂片を避け切らず、穴へ送る順序を作る。",par:92,parRot:20,tech:"分裂片を返弾以外で全処理",p:[7,5],exit:[7,1],pits:[[4,4],[10,4],[6,7],[8,7]],enemies:[E("resonator",7,2,1),E("splitter",3,5,1),E("splitter",11,5,3),E("hound",5,8,0),E("hound",9,8,0),E("turret",7,9,0)]}),
+  stage({name:"信号格子",intent:"中央射手を残して二ノードを点灯し、上下区画の射線を同時開放する。",par:105,parRot:22,tech:"両ノード点灯後ノーダメージ",p:[7,5],exit:[7,1],walls:[...HLine(3,1,6),...HLine(3,8,13),...HLine(7,1,6),...HLine(7,8,13)],nodes:[[5,5],[9,5]],gates:[[7,3],[7,7]],objects:[O("crate",6,5),O("crate",8,5)],enemies:[E("resonator",3,2,1),E("resonator",11,8,3),E("turret",12,5,3),E("turret",2,8,1),E("guard",11,4,3),E("splitter",3,6,1)]}),
+
+  stage({name:"三回目を武器に",intent:"脈動床を避けつつ、公転へ反応するエコー斉射を武器に変える。",par:68,parRot:12,tech:"最初のエコー斉射で2体撃破",p:[7,5],exit:[7,1],walls:[...HLine(7,9,12)],sparks:[[7,4],[7,6]],objects:[O("crate",6,6)],enemies:[E("echo",11,5,3),E("turret",2,5,1),E("hound",7,2,2)]}),
+  stage({name:"白い瞬間",intent:"アンカーの固定期を見て待ち、可動窓に穴へ送る。",par:72,parRot:13,tech:"最初のLOOSE窓でアンカー撃破",p:[7,7],exit:[7,1],walls:[...HLine(3,4,6)],pits:[[9,6]],enemies:[E("turret",2,5,1),E("anchor",8,5,3),E("hound",11,4,3),E("turret",12,7,3,{phase:34})]}),
+  stage({name:"回数と時刻",intent:"固定窓を待つ間も弾と追跡は進む。複数目的を一回に束ねる。",par:80,parRot:11,tech:"11回以内でアンカーを穴処理",p:[7,5],exit:[7,1],walls:[[10,4],[10,6]],pits:[[7,6]],objects:[O("mirror",6,4,0)],enemies:[E("echo",12,2,3),E("anchor",8,5,3),E("turret",2,5,1),E("hound",7,8,0)]}),
+  stage({name:"流れる導火線",intent:"床固定のベルトへ爆弾・敵・箱を置き、数拍先の到着点を読む。",par:84,parRot:15,tech:"武装爆弾をベルトで5セル運ぶ",p:[7,5],exit:[7,1],walls:[...VLine(2,2,8),...VLine(12,2,8)],conveyors:[...HLine(3,3,11).map(([x,y])=>[x,y,1]),...HLine(7,3,11).map(([x,y])=>[x,y,3])],objects:[O("crate",7,6)],enemies:[E("oracle",3,2,1),E("hound",11,3,3),E("guard",3,7,1)]}),
+  stage({name:"崩れる足場",intent:"通った床が穴へ変わり、公転中心と敵経路を自分で削る。",par:88,parRot:16,tech:"崩落穴で2体撃破",p:[7,8],exit:[7,1],walls:[[4,4],[10,6]],fragile:[...HLine(5,3,11),...VLine(7,3,7)],objects:[O("crate",6,5)],enemies:[E("oracle",3,2,1),E("guard",11,5,3),E("turret",2,7,1),E("hound",9,3,2)]}),
+  stage({name:"六手の時限盤",intent:"二つの爆弾、アンカー窓、エコー反撃を手順として同期する。",par:96,parRot:14,tech:"14回以内・爆発2回を同時成功",p:[7,6],exit:[7,1],pits:[[5,4],[9,4],[5,7],[9,7]],conveyors:[...HLine(5,4,10).map(([x,y])=>[x,y,1])],enemies:[E("oracle",2,2,1),E("oracle",12,2,3,{phase:35}),E("echo",7,2,2),E("anchor",8,5,3),E("guard",7,8,0)]}),
+  stage({name:"走る円環",intent:"ベルト上の危険位置を未来二拍まで読み、分裂と増幅をまとめる。",par:104,parRot:20,tech:"最初の撃破から3秒で4連鎖",p:[7,5],exit:[7,1],pits:[[3,5],[11,5]],conveyors:[[5,3,1],[6,3,1],[7,3,1],[8,3,1],[9,3,2],[9,4,2],[9,5,2],[9,6,2],[9,7,3],[8,7,3],[7,7,3],[6,7,3],[5,7,0],[5,6,0],[5,5,0],[5,4,0]],enemies:[E("oracle",2,2,1),E("splitter",12,2,3),E("hound",4,8,0),E("hound",10,8,0),E("resonator",7,1,2)]}),
+  stage({name:"火薬回転木馬",intent:"安全帯に見える円環を、箱・固定窓・爆弾・崩落床の到着順で作り替える。",par:118,parRot:24,tech:"箱を一周させて敵弾を防ぐ",p:[7,5],exit:[7,1],fragile:[[6,4],[8,6]],conveyors:[[5,3,1],[6,3,1],[7,3,1],[8,3,1],[9,3,2],[9,4,2],[9,5,2],[9,6,2],[9,7,3],[8,7,3],[7,7,3],[6,7,3],[5,7,0],[5,6,0],[5,5,0],[5,4,0]],objects:[O("crate",6,5)],enemies:[E("oracle",2,2,1),E("oracle",12,8,3,{phase:32}),E("echo",12,2,3),E("resonator",2,8,1),E("anchor",8,5,3),E("guard",7,9,0),E("turret",7,1,2)]}),
+
+  stage({name:"第一問の裏面",intent:"最初の返球を、三本の弾と辺・角の異なる公転として再出題する。",par:82,parRot:13,tech:"1回の公転で3弾を動かし3連鎖",p:[7,5],exit:[7,1],walls:[[3,5],[11,5],[7,2],[7,8]],pits:[[5,7],[9,3]],enemies:[E("turret",2,4,1),E("turret",12,6,3,{phase:18}),E("turret",6,1,2,{phase:36}),E("turret",8,9,0,{phase:54}),E("hound",7,3,2)]}),
+  stage({name:"二門一回転",intent:"箱と鏡を同時に配置し、開いた二射線を閉じずに攻める。",par:92,parRot:16,tech:"2ノード点灯後もノーダメージ",p:[7,5],exit:[7,1],walls:[...VLine(4,1,4),...VLine(4,6,9),...VLine(10,1,4),...VLine(10,6,9)],nodes:[[7,4],[7,6]],gates:[[4,5],[10,5]],pits:[[6,2],[8,8]],objects:[O("crate",6,5),O("mirror",8,5,0)],enemies:[E("turret",2,5,1),E("turret",12,5,3,{phase:26}),E("guard",7,2,2),E("resonator",7,8,0)]}),
+  stage({name:"予測者を読む",intent:"爆弾をエコーへ運ぶか、回さず予測地点だけを外すかを選ぶ。",par:96,parRot:17,tech:"エコー初回斉射前に爆破",p:[7,5],exit:[7,1],pits:[[5,3],[9,7]],conveyors:[...HLine(3,4,10).map(([x,y])=>[x,y,1]),...HLine(7,4,10).map(([x,y])=>[x,y,3])],objects:[O("mirror",6,4,1),O("mirror",8,6,0)],enemies:[E("oracle",2,2,1),E("oracle",12,8,3,{phase:30}),E("echo",12,2,3),E("anchor",8,5,3)]}),
+  stage({name:"爆裂分岐",intent:"爆発→増幅停止→分裂→穴処理という因果鎖を時間内に通す。",par:102,parRot:20,tech:"最初の爆発から4秒で全連鎖",p:[7,6],exit:[7,1],walls:[...HLine(8,5,9)],pits:[[5,5],[9,5],[5,2],[9,2]],enemies:[E("resonator",7,2,2),E("splitter",6,3,2),E("splitter",8,3,2),E("oracle",2,8,1),E("turret",12,6,3)]}),
+  stage({name:"支援体を守れ",intent:"危険な共鳴体をあえて残し、その複製だけで盾の背面を取る。",par:108,parRot:21,tech:"共鳴体を最後に撃破",p:[7,5],exit:[7,1],walls:[...HLine(6,9,12),...VLine(10,1,4)],pits:[[8,9],[11,7]],objects:[O("crate",6,5)],enemies:[E("turret",2,3,1),E("resonator",7,4,2),E("guard",7,8,0),E("oracle",11,5,3),E("echo",3,7,1)]}),
+  stage({name:"静かな零軸",intent:"固定窓・開門・鏡・複製・爆弾を少ない公転へ圧縮する精密問題。",par:116,parRot:18,tech:"全公転で2カテゴリ以上を同時移動",p:[7,5],exit:[7,1],walls:[...HLine(7,1,6),...HLine(7,8,13)],nodes:[[7,4]],gates:[[7,7]],pits:[[5,3],[9,8]],objects:[O("mirror",6,5,0),O("crate",7,6)],enemies:[E("oracle",2,2,1),E("turret",2,8,1),E("resonator",11,2,3),E("guard",11,8,0),E("anchor",8,5,3)]}),
+  stage({name:"嵐の零軸",intent:"逆回りの円環、脈動床、異なる時計を同期し、撃破後は一気に連鎖する。",par:124,parRot:25,tech:"ノーダメージかつ5秒内全連鎖",p:[7,5],exit:[7,1],pits:[[3,5],[11,5]],sparks:[[6,5],[7,6]],conveyors:[[5,3,3],[6,3,3],[7,3,3],[8,3,3],[9,3,2],[5,4,2],[5,5,2],[5,6,2],[5,7,1],[6,7,1],[7,7,1],[8,7,1],[9,7,0],[9,6,0],[9,5,0],[9,4,0]],objects:[O("mirror",6,4,1),O("mirror",8,6,0)],enemies:[E("oracle",2,2,1),E("echo",12,2,3),E("splitter",2,8,1),E("guard",12,8,3),E("anchor",8,5,3),E("resonator",7,8,0)]}),
+  stage({name:"ZERO AXIS",intent:"中央コアの弾で四ノードを点灯し、開いた四区画を異なる攻略法で制圧する最終試験。",par:150,parRot:30,tech:"4種類の撃破原因を使いノーダメージ",p:[7,5],exit:[7,4],walls:[...VLine(4,1,4),...VLine(4,6,9),...VLine(10,1,4),...VLine(10,6,9),...HLine(3,5,6),...HLine(3,8,9),...HLine(7,5,6),...HLine(7,8,9)],nodes:[[5,5],[9,5],[8,4],[6,6]],gates:[[4,5],[10,5],[7,3],[7,7]],pits:[[8,2],[11,6],[6,8]],objects:[O("crate",3,6),O("mirror",11,7,0)],enemies:[E("turret",2,5,1),E("hound",3,4,2),E("oracle",7,1,2),E("splitter",6,2,1),E("echo",12,5,3),E("anchor",11,4,2),E("resonator",7,9,0),E("guard",8,8,0),E("boss",7,4,0,{variant:4})]})
+];
+
+STAGES.forEach((s,i)=>{s.id=i+1;s.world=Math.floor(i/8);s.local=i%8+1});
+
+/* ---- BETA BUILD ---------------------------------------------------------
+   公開範囲は 1-1 〜 2-8 の16作戦。2-8クリアでベータ版クリア扱い。
+   BETA=false に戻せば全40作戦（3-1以降）がそのまま復活する。       */
+const BETA=true;
+const STAGE_TOTAL=BETA?16:40;
+const WORLD_TOTAL=BETA?2:5;
+if(BETA)STAGES.length=STAGE_TOTAL;
+
+const CIRCUIT_ROUTE=[8,16,24,32,33,35,39,40];
+const DEFAULT_SAVE={version:4,maxStage:1,unlocked:[1],records:{},highScore:0,circuitUnlocked:false,circuitHigh:0,settings:{volume:.55,music:true,shake:true,gamepad:true}};
+function cleanSave(raw){
+  const s=structuredClone(DEFAULT_SAVE);
+  if(!raw||typeof raw!=="object")return s;
+  s.maxStage=clamp(Number.isFinite(raw.maxStage)?raw.maxStage:1,1,STAGE_TOTAL);
+  s.unlocked=Array.isArray(raw.unlocked)?[...new Set(raw.unlocked.filter(n=>Number.isInteger(n)&&n>=1&&n<=STAGE_TOTAL))]:[1];
+  if(!s.unlocked.includes(1))s.unlocked.push(1);
+  s.records={};
+  if(raw.records&&typeof raw.records==="object")for(const [k,v] of Object.entries(raw.records)){
+    const id=clamp(parseInt(k)||1,1,STAGE_TOTAL);if(!v||typeof v!=="object")continue;
+    s.records[id]={score:Math.max(0,Number.isFinite(v.score)?Math.floor(v.score):0),time:Math.max(0,Number.isFinite(v.time)?v.time:0),rank:RANK_VALUE[v.rank]?v.rank:"-",tech:!!v.tech,medals:clamp(v.medals|0,0,7)};
+  }
+  s.highScore=Math.max(0,Number.isFinite(raw.highScore)?Math.floor(raw.highScore):0);s.circuitHigh=Math.max(0,Number.isFinite(raw.circuitHigh)?Math.floor(raw.circuitHigh):0);
+  s.circuitUnlocked=BETA?false:!!(raw.circuitUnlocked||raw.arcadeUnlocked);
+  const q=raw.settings||{};
+  s.settings={volume:clamp(Number.isFinite(q.volume)?q.volume:.55,0,1),music:q.music!==false,shake:q.shake!==false,gamepad:q.gamepad!==false};
+  return s;
+}
+function loadSave(){try{return cleanSave(JSON.parse(localStorage.getItem(BETA?"orbitalReprisalSaveBeta":"orbitalReprisalSave")))}catch(_){return cleanSave(null)}}
+function writeSave(){try{localStorage.setItem(BETA?"orbitalReprisalSaveBeta":"orbitalReprisalSave",JSON.stringify(save))}catch(_){}}
+let save=loadSave();
+
+class AudioRack{
+  constructor(){this.ac=null;this.voices=0;this.musicClock=0;this.musicStep=0;this.noiseState=0x8f31a5}
+  init(){if(this.ac)return;try{this.ac=new (window.AudioContext||window.webkitAudioContext)()}catch(_){}}
+  tone(freq,dur=.08,type="square",vol=.12,slide=0){
+    if(!this.ac||save.settings.volume<=0||this.voices>18)return;
+    const t=this.ac.currentTime,o=this.ac.createOscillator(),g=this.ac.createGain();this.voices++;
+    o.type=type;o.frequency.setValueAtTime(Math.max(30,freq),t);if(slide)o.frequency.exponentialRampToValueAtTime(Math.max(30,freq+slide),t+dur);
+    g.gain.setValueAtTime(vol*save.settings.volume,t);g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+    o.connect(g);g.connect(this.ac.destination);o.start(t);o.stop(t+dur+.01);o.onended=()=>{this.voices--;o.disconnect();g.disconnect()};
+  }
+  noise(dur=.07,vol=.08){
+    if(!this.ac||save.settings.volume<=0||this.voices>18)return;const n=Math.max(1,(this.ac.sampleRate*dur)|0),b=this.ac.createBuffer(1,n,this.ac.sampleRate),d=b.getChannelData(0);for(let i=0;i<n;i++){this.noiseState=(Math.imul(this.noiseState,1664525)+1013904223)>>>0;d[i]=this.noiseState/2147483648-1}
+    const s=this.ac.createBufferSource(),f=this.ac.createBiquadFilter(),g=this.ac.createGain(),t=this.ac.currentTime;this.voices++;s.buffer=b;f.type="highpass";f.frequency.value=900;g.gain.setValueAtTime(vol*save.settings.volume,t);g.gain.exponentialRampToValueAtTime(.0001,t+dur);s.connect(f);f.connect(g);g.connect(this.ac.destination);s.start();s.stop(t+dur+.01);s.onended=()=>{this.voices--;s.disconnect();f.disconnect();g.disconnect()};
+  }
+  sfx(n){const m={move:[180,.035,"square",.025,30],spin:[330,.11,"sawtooth",.08,420],just:[740,.18,"square",.12,620],block:[92,.08,"square",.08,-28],shoot:[210,.06,"square",.055,-80],hit:[120,.09,"sawtooth",.11,-60],kill:[440,.14,"square",.1,500],hurt:[150,.22,"sawtooth",.14,-105],node:[520,.2,"sine",.12,600],clear:[523,.35,"square",.11,523],ui:[300,.045,"square",.05,80],gameover:[180,.6,"sawtooth",.12,-130],crate:[80,.1,"square",.09,-25]};if(n==="boom"){this.noise(.18,.14);this.tone(80,.22,"sawtooth",.09,-35);return}if(n==="step"){this.noise(.025,.025);return}const a=m[n];if(a)this.tone(...a)}
+  tick(world,active){
+    if(!this.ac||!save.settings.music||!active)return;if(--this.musicClock>0)return;this.musicClock=world>=3?10:12;
+    const roots=[110,123.47,98,130.81,92.5],seq=[[0,7,12,7],[0,3,10,7],[0,5,8,12],[0,7,10,14],[0,1,7,13]][world]||[0,7,12,7],semi=seq[this.musicStep++%seq.length];this.tone(roots[world]*Math.pow(2,semi/12),.08,"square",.018,0);
+  }
+}
+const audio=new AudioRack();
+
+const input={down:new Set(),keyDown:new Set(),gpDown:new Set(),pressed:new Set(),released:new Set(),gpPrev:[],axisX:0,axisY:0};
+function syncDown(){input.down=new Set([...input.keyDown,...input.gpDown])}
+function normKey(k){k=k.toLowerCase();return ({" ":"z","arrowup":"up","arrowdown":"down","arrowleft":"left","arrowright":"right","escape":"escape"})[k]||k}
+addEventListener("keydown",e=>{const k=normKey(e.key);if(["up","down","left","right","z","x","w","a","s","d","j","k","p","escape","enter","r","m","h","q","c"].includes(k))e.preventDefault();if(!input.keyDown.has(k))input.pressed.add(k);input.keyDown.add(k);syncDown();audio.init();if(audio.ac?.state==="suspended")audio.ac.resume()});
+addEventListener("keyup",e=>{const k=normKey(e.key);input.keyDown.delete(k);syncDown();input.released.add(k)});
+addEventListener("blur",()=>{input.keyDown.clear();input.gpDown.clear();syncDown();input.pressed.clear();if(game.mode==="play")game.mode="pause"});
+document.addEventListener("visibilitychange",()=>{if(document.hidden&&game.mode==="play")game.mode="pause"});
+canvas.addEventListener("pointerdown",()=>{canvas.focus();audio.init()});
+
+function pollGamepad(){
+  if(!save.settings.gamepad||!navigator.getGamepads)return;const g=[...navigator.getGamepads()].find(Boolean);if(!g){input.gpPrev=[];input.gpDown.clear();input.axisX=0;input.axisY=0;syncDown();return}
+  const rawX=g.axes[0]||0,rawY=g.axes[1]||0,ax=input.axisX?(Math.abs(rawX)>.25?Math.sign(rawX):0):(Math.abs(rawX)>.45?Math.sign(rawX):0),ay=input.axisY?(Math.abs(rawY)>.25?Math.sign(rawY):0):(Math.abs(rawY)>.45?Math.sign(rawY):0);input.axisX=ax;input.axisY=ay;
+  const virtual=[g.buttons[0]?.pressed,g.buttons[1]?.pressed,g.buttons[9]?.pressed,g.buttons[8]?.pressed,ay<0||g.buttons[12]?.pressed,ay>0||g.buttons[13]?.pressed,ax<0||g.buttons[14]?.pressed,ax>0||g.buttons[15]?.pressed];
+  const names=["z","x","escape","r","up","down","left","right"];
+  virtual.forEach((v,i)=>{if(v&&!input.gpPrev[i])input.pressed.add(names[i]);if(v)input.gpDown.add(names[i]);else input.gpDown.delete(names[i])});input.gpPrev=virtual;syncDown();
+}
+
+const game={
+  mode:"title",stageId:1,selectId:Math.max(...save.unlocked),tick:0,stageTick:0,score:0,lives:3,arcade:false,circuitPos:0,
+  player:null,terrain:null,enemies:[],objects:[],shots:[],bombs:[],particles:[],floaters:[],deathDelay:0,
+  spinCooldown:0,spinBuffer:0,moveCooldown:0,lastMoveDir:0,lastMoveTick:-999,hitStop:0,shake:0,flash:0,objectiveDelay:0,reserveTick:0,
+  stats:null,exitOpen:false,deathReason:"",deathCell:null,clearData:null,briefPage:0,restartHold:0,
+  toast:"",toastTick:0,stageStartScore:0,unlockedNotice:"",debugFailures:[]
+};
+
+function announce(t){sr.textContent=t}
+function rec(id){return save.records[id]||{score:0,time:0,rank:"-",tech:false,medals:0}}
+function worldMaster(w){return rec(w*8+6).rank!=="-"&&rec(w*8+7).rank!=="-"}
+function isUnlocked(id){return save.unlocked.includes(id)}
+function unlockAfter(id){
+  const w=Math.floor((id-1)/8),n=(id-1)%8+1,to=[];
+  if(n<5)to.push(id+1);else if(n===5)to.push(id+1,id+2);else if(n===6||n===7)to.push(w*8+8);else if(n===8&&id<STAGE_TOTAL)to.push(id+1);
+  for(const q of to)if(q<=STAGE_TOTAL&&!save.unlocked.includes(q)){save.unlocked.push(q);game.unlockedNotice=`STAGE ${Math.ceil(q/8)}-${(q-1)%8+1} OPEN`}
+  save.maxStage=Math.max(save.maxStage,...save.unlocked);if(!BETA&&id===40)save.circuitUnlocked=true;
+}
+
+function startCircuit(){game.arcade=true;game.circuitPos=0;game.score=0;game.lives=3;loadStage(CIRCUIT_ROUTE[0]);game.stageStartScore=0;announce("CIRCUIT MODE。8区画を3機で連続攻略")}
+
+function persistRunScore(){if(game.arcade)save.circuitHigh=Math.max(save.circuitHigh,game.score);else save.highScore=Math.max(save.highScore,game.score);writeSave()}
+function abandonCircuit(){persistRunScore();game.arcade=false;game.mode="title"}
+function addSet(a){return new Set(a.map(([x,y])=>keyOf(x,y)))}
+function loadStage(id,fromDeath=false){
+  id=clamp(id|0,1,STAGE_TOTAL);const s=STAGES[id-1];game.stageId=id;game.mode=fromDeath?"play":"brief";game.tick=0;game.stageTick=0;game.hitStop=0;game.shake=0;game.flash=0;game.objectiveDelay=0;game.reserveTick=0;game.deathDelay=0;game.exitOpen=false;game.deathReason="";game.deathCell=null;game.clearData=null;game.restartHold=0;game.toast="";game.toastTick=0;seedRng(id*9719);
+  game.player={x:s.p[0],y:s.p[1],fromX:s.p[0],fromY:s.p[1],move:0,hp:3,maxHp:3,invuln:0,blink:0,lastSafe:[...s.p],trail:[]};
+  game.terrain={walls:addSet(uniq(s.walls)),pits:addSet(s.pits),bridges:new Set(),sparks:addSet(s.sparks),fragile:new Map(s.fragile.map(p=>[keyOf(p[0],p[1]),2])),conveyors:new Map(s.conveyors.map(p=>[keyOf(p[0],p[1]),p[2]])),nodes:new Map(s.nodes.map(p=>[keyOf(p[0],p[1]),false])),gates:addSet(s.gates),exit:s.exit};
+  game.enemies=s.enemies.map(q=>makeEnemy(q));game.objects=s.objects.map(q=>makeObject(q));game.shots=[];game.bombs=[];game.particles=[];game.floaters=[];game.spinCooldown=0;game.spinBuffer=0;game.moveCooldown=0;game.lastMoveDir=0;game.lastMoveTick=-999;game.briefPage=0;
+  game.stats={damage:0,rotations:0,emptyRotations:0,cw:0,ccw:0,kills:0,chain:0,maxChain:0,chainTick:0,just:0,justRoots:new Set(),justAwarded:new Set(),goldLinks:0,nodes:0,nodeRoots:[],pitKills:0,shardPitKills:0,explosionKills:0,returnKills:0,backKills:0,crateLost:0,mirrorMoves:0,multiMoves:0,mixedMoves:0,allMixed:true,killOrder:[],killQuadrants:[],lastKillType:"",killCauses:new Set(),rootKills:new Map(),maxRootKills:0,reserve:false,echoVolleys:0,firstKillTick:-1,lastKillTick:-1,techFlags:{}};
+  if(!fromDeath)game.stageStartScore=game.score;announce(`ステージ${s.world+1}-${s.local} ${s.name}。${s.intent}`);
+}
+
+function makeEnemy(q){
+  const hp=q.type==="boss"?4:1;return {id:uid++,kind:"enemy",type:q.type,x:q.x,y:q.y,dir:q.dir|0,port:0,alive:true,hp,phase:q.phase|0,cool:Math.max(10,q.phase|0),state:"idle",wind:0,windMax:1,attackDir:q.dir|0,redirected:false,charged:false,stun:0,age:0,shielded:false,variant:q.variant||0,split:false,echoQueue:[],rootPhase:q.phase|0,anchorWindows:0,resCooldown:0,flash:0,lastHit:-1,anim:null};
+}
+function makeObject(q){return {id:uid++,kind:"object",type:q.type,x:q.x,y:q.y,dir:q.dir|0,alive:true,hp:q.type==="crate"?2:1,beltDistance:0,flash:0,anim:null}}
+
+function stageDef(){return STAGES[game.stageId-1]}
+function gateOpen(){return [...game.terrain.nodes.values()].every(Boolean)}
+function isWall(x,y){return x<=0||y<=0||x>=COLS-1||y>=ROWS-1||game.terrain.walls.has(keyOf(x,y))||game.terrain.gates.has(keyOf(x,y))&&!gateOpen()}
+function isPit(x,y){return game.terrain.pits.has(keyOf(x,y))&&!game.terrain.bridges.has(keyOf(x,y))}
+function objectAt(x,y,ignore=null){return game.objects.find(o=>o.alive&&o.id!==ignore&&o.x===x&&o.y===y)}
+function enemyAt(x,y,ignore=null){return game.enemies.find(e=>e.alive&&e.id!==ignore&&e.x===x&&e.y===y)}
+function solidAt(x,y,ignore=null){return objectAt(x,y,ignore)||enemyAt(x,y,ignore)}
+function canOccupy(x,y,ignore=null,avoidHazard=false){return !isWall(x,y)&&!solidAt(x,y,ignore)&&!(game.player&&game.player.x===x&&game.player.y===y)&&(!avoidHazard||!isPit(x,y))}
+function objectives(){return game.enemies.filter(e=>e.alive).length}
+
+function particle(x,y,color,n=8,speed=1){for(let i=0;i<n&&game.particles.length<240;i++){const a=rand()*Math.PI*2,v=(.3+rand())*speed;game.particles.push({x:x+.5,y:y+.5,vx:Math.cos(a)*v/18,vy:Math.sin(a)*v/18,life:20+rand()*22,color,size:2+rand()*4})}}
+function floater(x,y,text,color=PALETTE.white){game.floaters.push({x:x+.5,y:y+.2,text,color,life:60})}
+function addScore(v,x,y,label=""){v=Math.floor(v);game.score+=v;if(v>0)floater(x,y,label||`+${v}`,PALETTE.gold)}
+function awardJustLink(rootId,x,y){if(!rootId||!game.stats.justRoots.has(rootId)||game.stats.justAwarded.has(rootId))return;game.stats.justAwarded.add(rootId);addScore(200,x,y,"JUST LINK +200")}
+
+function leaveFragile(x,y){const k=keyOf(x,y);if(!game.terrain.fragile.has(k))return;const n=game.terrain.fragile.get(k)-1;if(n<=0){game.terrain.fragile.delete(k);game.terrain.pits.add(k);particle(x,y,"#8599a8",12,1.4);audio.sfx("crate")}else game.terrain.fragile.set(k,n)}
+
+function movePlayer(dir){
+  const p=game.player,[dx,dy]=DIRS[dir],nx=p.x+dx,ny=p.y+dy;if(isWall(nx,ny)||solidAt(nx,ny)){audio.sfx("block");game.moveCooldown=4;return false}
+  const ox=p.x,oy=p.y;p.lastSafe=[ox,oy];p.fromX=ox;p.fromY=oy;p.x=nx;p.y=ny;p.move=6;game.lastMoveDir=dir;game.lastMoveTick=game.stageTick;game.moveCooldown=6;p.trail.push([ox,oy]);if(p.trail.length>10)p.trail.shift();leaveFragile(ox,oy);audio.sfx("step");
+  if(isPit(nx,ny)){hurtPlayer("足場のない空間へ落下",nx,ny,true);return true}
+  if(game.terrain.sparks.has(keyOf(nx,ny))&&sparkActive())hurtPlayer("放電床の発火",nx,ny);
+  if(game.exitOpen&&nx===game.terrain.exit[0]&&ny===game.terrain.exit[1])finishStage();return true;
+}
+
+function sparkActive(){return (Math.floor(game.stageTick/45)&1)===0}
+function ringCell(cx,cy,x,y){return Math.max(Math.abs(x-cx),Math.abs(y-cy))===1}
+function anchoredBlocks(cx,cy){return game.enemies.some(e=>e.alive&&e.type==="anchor"&&anchorRoot(e)&&ringCell(cx,cy,e.x,e.y))}
+function anchorRoot(e){const t=(e.rootPhase+e.age)%156;return t<72||t>=144}
+
+function tryOrbit(sign,source="player"){
+  const p=game.player;if(source==="player"&&game.spinCooldown>0){game.spinBuffer=sign;return false}
+  if(source==="player"&&anchoredBlocks(p.x,p.y)){blockedOrbit("ANCHOR LOCK");return false}
+  const cx=p.x,cy=p.y;
+  // Fixed walls or closed gates anywhere in the eight-cell ring lock the mechanism.
+  for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if((dx||dy)&&isWall(cx+dx,cy+dy)){blockedOrbit("RING BLOCKED");return false}
+  const loose=[];
+  for(const e of game.enemies)if(e.alive&&ringCell(cx,cy,e.x,e.y)&&!(e.type==="anchor"&&anchorRoot(e))&&e.type!=="boss")loose.push(e);
+  for(const o of game.objects)if(o.alive&&ringCell(cx,cy,o.x,o.y))loose.push(o);
+  for(const b of game.bombs)if(b.alive&&ringCell(cx,cy,b.x,b.y))loose.push(b);
+  for(const s of game.shots)if(s.alive&&ringCell(cx,cy,s.x,s.y))loose.push(s);
+  const ids=new Set(loose.map(v=>v.id));
+  for(const v of loose){
+    if(v.kind==="shot"||v.kind==="bomb")continue;const dx=v.x-cx,dy=v.y-cy,[rx,ry]=sign>0?cwPos(dx,dy):ccwPos(dx,dy),nx=cx+rx,ny=cy+ry,st=solidAt(nx,ny,v.id);
+    if(st&&!ids.has(st.id)){blockedOrbit("OBJECT LOCK");return false}
+  }
+  const now=loose.map(v=>({v,x:v.x,y:v.y}));
+  let categories=new Set(),near=false;
+  for(const q of now){
+    const v=q.v,dx=q.x-cx,dy=q.y-cy,[rx,ry]=sign>0?cwPos(dx,dy):ccwPos(dx,dy);v.x=cx+rx;v.y=cy+ry;v.anim={ox:q.x,oy:q.y,life:7,sign,cx,cy};categories.add(v.kind||v.type);
+    if(v.kind==="shot"&&source==="player"){
+      const imminent=v.step<=4&&q.x+DIRS[v.dir][0]===cx&&q.y+DIRS[v.dir][1]===cy;near=near||imminent;if(imminent)game.stats.justRoots.add(v.rootId);v.level=Math.max(v.level||0,imminent?2:Math.min(2,(v.level||0)+1));if(v.level>=2)v.pierce=Math.max(2,v.pierce||1);v.playerTouched=true;v.grace=3;v.color=v.level>=2?PALETTE.gold:PALETTE.cyan;
+    }
+    if(v.kind==="bomb"&&source==="player")v.armed=true;
+    if(v.kind==="enemy"&&v.state!=="idle"&&source==="player")v.redirected=true;
+    if(v.kind==="object"&&v.type==="mirror")game.stats.mirrorMoves++;
+  }
+  if(source==="player"){
+    game.spinCooldown=14;game.stats.rotations++;if(sign>0)game.stats.cw++;else game.stats.ccw++;if(!loose.length)game.stats.emptyRotations++;if(loose.length>=3)game.stats.multiMoves++;if(categories.size>=2)game.stats.mixedMoves++;else game.stats.allMixed=false;
+    for(const e of game.enemies)if(e.alive&&e.type==="echo"){e.echoQueue.push({timer:30,sign});if(e.echoQueue.length>3)e.echoQueue.shift()}
+  }
+  if(near){game.stats.just++;game.hitStop=4;audio.sfx("just");floater(cx,cy-1,"JUST RETURN",PALETTE.gold)}else audio.sfx("spin");
+  particle(cx-.4,cy-.4,source==="player"?PALETTE.cyan:PALETTE.violet,18,1.5);game.shake=Math.max(game.shake,source==="player"?4:2);resolveLandings();return true;
+}
+
+function blockedOrbit(msg){game.spinCooldown=4;game.toast=msg;game.toastTick=35;audio.sfx("block");game.flash=4}
+function resolveLandings(){
+  for(const e of game.enemies)if(e.alive){if(isPit(e.x,e.y))killEnemy(e,"pit");else if(game.terrain.sparks.has(keyOf(e.x,e.y))&&sparkActive())hitEnemy(e,1,"spark")}
+  for(const o of game.objects)if(o.alive&&isPit(o.x,o.y)){
+    if(o.type==="crate"){game.terrain.bridges.add(keyOf(o.x,o.y));o.alive=false;game.stats.crateLost++;floater(o.x,o.y,"BRIDGE",PALETTE.green);audio.sfx("crate")}else{o.alive=false;particle(o.x,o.y,PALETTE.muted,8)}
+  }
+  for(const b of game.bombs)if(b.alive&&isPit(b.x,b.y)){b.fuse=Math.min(b.fuse,12);b.armed=true}
+  for(const s of game.shots)if(s.alive&&isWall(s.x,s.y))s.alive=false;
+}
+
+function lineDirTo(ax,ay,bx,by){const dx=bx-ax,dy=by-ay;if(Math.abs(dx)>Math.abs(dy))return dx>0?1:3;return dy>0?2:0}
+function pathClear(ax,ay,bx,by){if(ax!==bx&&ay!==by)return false;const d=lineDirTo(ax,ay,bx,by),[dx,dy]=DIRS[d];let x=ax+dx,y=ay+dy;while(x!==bx||y!==by){if(isWall(x,y)||objectAt(x,y))return false;x+=dx;y+=dy}return true}
+function greedyDirs(e,toward=true){
+  const p=game.player,dx=p.x-e.x,dy=p.y-e.y,a=[];if(Math.abs(dx)>=Math.abs(dy)){if(dx)a.push(dx>0?1:3);if(dy)a.push(dy>0?2:0)}else{if(dy)a.push(dy>0?2:0);if(dx)a.push(dx>0?1:3)}a.push(0,1,2,3);const u=[...new Set(a)];return toward?u:u.map(d=>(d+2)%4);
+}
+function tryEnemyMove(e,dir){const [dx,dy]=DIRS[dir],nx=e.x+dx,ny=e.y+dy;if(nx===game.player.x&&ny===game.player.y){hurtPlayer(`${enemyName(e.type)}との接触`,nx,ny);return false}if(!canOccupy(nx,ny,e.id,true)||game.terrain.sparks.has(keyOf(nx,ny))&&sparkActive())return false;const ox=e.x,oy=e.y;e.x=nx;e.y=ny;e.anim={ox,oy,life:6};leaveFragile(ox,oy);return true}
+function enemyName(t){return ({turret:"ニードラー",hound:"ハウンド",oracle:"オラクル",guard:"バルワーク",splitter:"スプリッタ",shard:"スプリンタ",resonator:"レゾネータ",echo:"エコー",anchor:"アンカー",boss:"ゼロ・コア"})[t]||t}
+
+function fireShot(x,y,dir,level=0,ownerId=0,rootId=0){
+  if(game.shots.length>96)return null;const id=uid++,shot={id,kind:"shot",x,y,dir,level,step:8,ttl:240,alive:true,ownerId,rootId:rootId||id,color:level>=2?PALETTE.gold:level?PALETTE.cyan:PALETTE.red,playerTouched:level>0,grace:0,pierce:level>=2?2:1,killCount:0,seenRes:new Set(),anim:null};game.shots.push(shot);audio.sfx("shoot");return shot
+}
+function spawnBomb(x,y,fuse=72,armed=false,owner=0){if(game.bombs.length<28)game.bombs.push({id:uid++,kind:"bomb",type:"bomb",x,y,fuse,alive:true,armed,owner,beltDistance:0,flash:0,anim:null})}
+
+function startWind(e,kind,frames,dir){e.state=kind;e.wind=frames;e.windMax=frames;e.attackDir=dir;e.redirected=false}
+function updateEnemy(e){
+  if(!e.alive)return;e.age++;if(e.resCooldown>0)e.resCooldown--;if(e.stun>0){e.stun--;return}if(e.cool>0)e.cool--;
+  if(e.type==="anchor"){updateAnchor(e);return}if(e.type==="echo")updateEchoQueue(e);
+  if(e.state!=="idle"){
+    if(--e.wind<=0)resolveEnemyAction(e);return;
+  }
+  if(e.cool>0)return;
+  const p=game.player,dist=Math.abs(p.x-e.x)+Math.abs(p.y-e.y);
+  switch(e.type){
+    case"turret":startWind(e,"fire",24,e.dir);break;
+    case"hound":if(dist===1)startWind(e,"bite",18,lineDirTo(e.x,e.y,p.x,p.y));else{for(const d of greedyDirs(e))if(tryEnemyMove(e,d)){e.dir=d;break}e.cool=30}break;
+    case"oracle":{const recent=game.stageTick-game.lastMoveTick<=12,d=game.lastMoveDir,[dx,dy]=DIRS[d],tx=clamp(p.x+(recent?dx*2:0),1,COLS-2),ty=clamp(p.y+(recent?dy*2:0),1,ROWS-2);e.target=[tx,ty];startWind(e,"bomb",30,d);break}
+    case"guard":if(dist===1)startWind(e,"shieldBash",20,lineDirTo(e.x,e.y,p.x,p.y));else{for(const d of greedyDirs(e))if(tryEnemyMove(e,d)){e.dir=d;break}e.cool=42}break;
+    case"splitter":case"shard":{for(const d of (e.type==="shard"?[e.dir,(e.dir+1)%4]:greedyDirs(e)))if(tryEnemyMove(e,d)){e.dir=d;break}e.cool=e.type==="shard"?24:48;break}
+    case"resonator":{if(pathClear(e.x,e.y,p.x,p.y))startWind(e,"fire",28,lineDirTo(e.x,e.y,p.x,p.y));else{for(const d of greedyDirs(e,false))if(tryEnemyMove(e,d)){e.dir=d;break}e.cool=58}break}
+    case"echo":{for(const d of greedyDirs(e,false))if(tryEnemyMove(e,d)){e.dir=d;break}e.cool=55;break}
+    case"boss":startWind(e,"bossFire",30,e.dir);break;
+  }
+}
+
+function resolveEnemyAction(e){
+  if(!e.alive)return;const p=game.player;e.state="idle";
+  switch(e.type){
+    case"turret":fireShot(e.x,e.y,e.attackDir,e.redirected?1:0,e.id);e.cool=60;break;
+    case"hound":case"guard":{const [dx,dy]=DIRS[e.attackDir],tx=e.x+dx,ty=e.y+dy;if(tx===p.x&&ty===p.y)hurtPlayer(`${enemyName(e.type)}の予告攻撃`,tx,ty);else{const hit=enemyAt(tx,ty,e.id);if(hit&&e.redirected)hitEnemy(hit,1,e.type==="hound"?"redirectedBite":"redirectedBash",e.attackDir)}e.cool=e.type==="hound"?30:42;break}
+    case"oracle":spawnBomb(e.target[0],e.target[1],game.stageId===28?216:72,e.redirected,e.id);e.cool=78;break;
+    case"resonator":fireShot(e.x,e.y,e.attackDir,e.redirected?1:0,e.id);e.cool=66;break;
+    case"echo":e.cool=52;break;
+    case"boss":bossVolley(e);e.cool=Math.max(42,70-(4-e.hp)*7);e.dir=(e.dir+1)%4;break;
+  }
+}
+
+function updateAnchor(e){
+  const t=(e.rootPhase+e.age)%156;if(t===72){e.anchorWindows++;floater(e.x,e.y,"LOOSE",PALETTE.white)}if(t===90){for(const d of greedyDirs(e))if(tryEnemyMove(e,d)){e.dir=d;break}}
+  if(t===0||t===78){for(let d=0;d<4;d++)fireShot(e.x,e.y,d,0,e.id)}
+}
+function updateEchoQueue(e){
+  for(const q of e.echoQueue)q.timer--;const due=e.echoQueue.filter(q=>q.timer<=0);e.echoQueue=e.echoQueue.filter(q=>q.timer>0);for(const q of due){game.stats.echoVolleys++;for(let d=0;d<4;d++)fireShot(e.x,e.y,d,0,e.id);floater(e.x,e.y,q.sign>0?"ECHO CW":"ECHO CCW",PALETTE.violet);game.shake=3}
+}
+function bossVolley(e){
+  const phase=4-e.hp;if(phase===0){for(let d=0;d<4;d++)fireShot(e.x,e.y,d)}
+  else if(phase===1){for(let d=0;d<4;d++)fireShot(e.x,e.y,(d+e.dir)%4,d&1?0:1,e.id)}
+  else if(phase===2){for(let d=0;d<4;d++)fireShot(e.x,e.y,d);spawnBomb(clamp(game.player.x+DIRS[game.lastMoveDir][0]*2,1,13),clamp(game.player.y+DIRS[game.lastMoveDir][1]*2,1,9),58,false,e.id)}
+  else{for(let d=0;d<4;d++){const a=fireShot(e.x,e.y,d,0,e.id),b=fireShot(e.x,e.y,d,0,e.id);if(a)a.step=3+d;if(b)b.step=10+d}}
+}
+
+function updateShots(){
+  const intents=[];
+  for(const s of game.shots)if(s.alive){if(s.grace>0){s.grace--;continue}if(--s.ttl<=0){s.alive=false;continue}if(--s.step<=0){s.step=8;const [dx,dy]=DIRS[s.dir];intents.push({s,nx:s.x+dx,ny:s.y+dy,ox:s.x,oy:s.y})}}
+  // Opposing projectiles entering the same cell cancel before damage.
+  const buckets=new Map();for(const m of intents){const k=keyOf(m.nx,m.ny);if(!buckets.has(k))buckets.set(k,[]);buckets.get(k).push(m)}
+  for(const list of buckets.values())if(list.length>1){const used=new Set();for(let i=0;i<list.length;i++)for(let j=i+1;j<list.length;j++)if(!used.has(i)&&!used.has(j)&&(list[i].s.dir+2)%4===list[j].s.dir){list[i].s.alive=false;list[j].s.alive=false;used.add(i);used.add(j);particle(list[i].nx,list[i].ny,PALETTE.white,5,.6)}}
+  for(const m of intents){const s=m.s;if(!s.alive)continue;if(isWall(m.nx,m.ny)){s.alive=false;continue}
+    const o=objectAt(m.nx,m.ny);if(o){if(o.type==="mirror"){const maps=o.dir%2===0?[1,0,3,2]:[3,2,1,0];s.dir=maps[s.dir];s.step=5;particle(m.ox,m.oy,s.color,3,.5);continue}else{if(o.beltDistance>=16)game.stats.techFlags.circuitCrateBlock=true;if(s.level>=2){o.hp--;o.flash=8;if(o.hp<=0){o.alive=false;particle(o.x,o.y,PALETTE.gold,12);game.stats.crateLost++}}s.alive=false;audio.sfx("crate");continue}}
+    const nk=keyOf(m.nx,m.ny);if(game.terrain.nodes.has(nk)){if(s.level>0&&!game.terrain.nodes.get(nk)){game.terrain.nodes.set(nk,true);game.stats.nodes++;game.stats.nodeRoots.push(s.rootId);if(gateOpen()&&game.stats.kills===0)game.stats.techFlags.nodesBeforeKill=true;addScore(300,m.nx,m.ny,"NODE ON");awardJustLink(s.rootId,m.nx,m.ny);audio.sfx("node")}s.alive=false;continue}
+    if(m.nx===game.player.x&&m.ny===game.player.y){s.alive=false;hurtPlayer(s.level?"自分で返した弾":"敵の直射弾",m.nx,m.ny);continue}
+    const e=enemyAt(m.nx,m.ny);if(e&&s.level>0){
+      if(e.type==="guard"&&!incomingIsRear(e,s.dir)){
+        const front=s.dir===(e.dir+2)%4;e.flash=8;if(front){s.dir=(s.dir+1)%4;s.step=5;floater(e.x,e.y,"DEFLECT",PALETTE.cyan);audio.sfx("block");continue}
+        const [pdx,pdy]=DIRS[s.dir],px=e.x+pdx,py=e.y+pdy;if(!isWall(px,py)&&!solidAt(px,py,e.id)&&(px!==game.player.x||py!==game.player.y)){const ox=e.x,oy=e.y;e.x=px;e.y=py;e.anim={ox,oy,life:6};if(isPit(px,py))killEnemy(e,"pit")}s.alive=false;floater(e.x,e.y,"PUSH",PALETTE.cyan);audio.sfx("block");continue
+      }
+      const wasAlive=e.alive,wasGold=s.level>=2;hitEnemy(e,1,wasGold?"gold":"return",s.dir,s);const killed=wasAlive&&!e.alive;if(killed){s.killCount++;if(s.killCount===2)game.stats.goldLinks++}if(wasGold&&s.pierce>1&&killed){s.pierce--;s.level=1;s.color=PALETTE.cyan}else s.alive=false;if(!s.alive)continue}
+    // Resonators duplicate a passing projectile once per resonator/projectile pair.
+    for(const r of game.enemies)if(r.alive&&r.type==="resonator"&&r.resCooldown<=0&&Math.abs(r.x-m.nx)+Math.abs(r.y-m.ny)===1&&!s.seenRes.has(r.id)){s.seenRes.add(r.id);r.resCooldown=24;const nd=(s.dir+(r.dir%2?1:3))%4,clone=fireShot(m.nx,m.ny,nd,s.level,r.id,s.rootId);if(clone)clone.seenRes=new Set(s.seenRes);break}
+    s.x=m.nx;s.y=m.ny;s.anim={ox:m.ox,oy:m.oy,life:4};
+  }
+}
+
+function updateBombs(){for(const b of game.bombs)if(b.alive){if(--b.fuse<=0)explode(b.x,b.y,b.armed,b)}}
+function explode(x,y,armed,source){
+  if(source&&!source.alive)return;if(source){if(armed&&(source.beltDistance||0)>=5)game.stats.techFlags.beltBomb=true;source.alive=false}audio.sfx("boom");game.shake=8;game.flash=7;particle(x,y,armed?PALETTE.gold:PALETTE.orange,24,2);
+  const cells=[[x,y],[x+1,y],[x-1,y],[x,y+1],[x,y-1]];
+  for(const [cx,cy]of cells){if(cx===game.player.x&&cy===game.player.y)hurtPlayer("予測爆弾の爆発",cx,cy);if(armed){const e=enemyAt(cx,cy);if(e)hitEnemy(e,1,"explosion",0);const o=objectAt(cx,cy);if(o&&o.type==="crate"){o.hp--;if(o.hp<=0){o.alive=false;game.stats.crateLost++}}for(const b of game.bombs)if(b.alive&&b!==source&&b.x===cx&&b.y===cy)b.fuse=Math.min(b.fuse,3)}}
+}
+
+function incomingIsRear(e,shotDir){return shotDir===e.dir}
+function linkedShield(e){return e.type!=="resonator"&&game.enemies.some(r=>r.alive&&r.type==="resonator"&&Math.abs(r.x-e.x)+Math.abs(r.y-e.y)<=2)}
+function hitEnemy(e,amount,cause,dir=0,shot=null){
+  if(!e.alive||e.lastHit===game.tick)return false;e.lastHit=game.tick;
+  if(e.type==="boss"&&!gateOpen()){floater(e.x,e.y,"CORE SEALED",PALETTE.violet);audio.sfx("block");return true}
+  if(e.type==="boss"&&(cause!=="return"&&cause!=="gold"||dir!==e.port)){floater(e.x,e.y,`PORT ${DIR_NAME[e.port]}`,PALETTE.gold);audio.sfx("block");return true}
+  if(e.type==="anchor"&&anchorRoot(e)){floater(e.x,e.y,"ROOT",PALETTE.violet);audio.sfx("block");return true}
+  if(e.type==="guard"&&!incomingIsRear(e,dir)&&cause!=="pit"&&cause!=="spark"&&cause!=="explosion"){floater(e.x,e.y,"GUARD",PALETTE.cyan);audio.sfx("block");return true}
+  if(linkedShield(e)&&cause!=="pit"&&cause!=="explosion"){floater(e.x,e.y,"RESONANCE",PALETTE.gold);audio.sfx("block");return true}
+  if(e.type==="splitter"&&(cause==="return"||cause==="gold")&&!e.split){
+    e.alive=false;e.split=true;splitEnemy(e,dir);scoreKill(e,cause,120);recordKillMeta(e,cause,shot);return true;
+  }
+  const rear=e.type==="guard"&&incomingIsRear(e,dir);e.hp-=amount;e.flash=8;audio.sfx("hit");if(e.hp<=0){if(rear)game.stats.backKills++;killEnemy(e,cause,shot)}else{floater(e.x,e.y,`CORE ${e.hp}`,PALETTE.red);if(e.type==="boss"){e.port=(e.port+1)%4;e.cool=35;particle(e.x,e.y,PALETTE.violet,20,1.6)}}return true;
+}
+function splitEnemy(e,dir){
+  const preferred=[(dir+1)%4,(dir+3)%4],used=new Set();for(const facing of preferred){let placed=false;for(const d of [facing,(facing+1)%4,(facing+3)%4,(facing+2)%4]){const [dx,dy]=DIRS[d],nx=e.x+dx,ny=e.y+dy,k=keyOf(nx,ny);if(used.has(k))continue;if(isPit(nx,ny)){const shard=makeEnemy(E("shard",nx,ny,facing,{phase:12}));game.enemies.push(shard);killEnemy(shard,"pit");used.add(k);placed=true;break}if(canOccupy(nx,ny,null,false)){game.enemies.push(makeEnemy(E("shard",nx,ny,facing,{phase:12})));used.add(k);placed=true;break}}if(!placed)floater(e.x,e.y,"SHARD LOST",PALETTE.muted)}floater(e.x,e.y,"SPLIT!",PALETTE.orange);particle(e.x,e.y,PALETTE.orange,16,1.4)
+}
+function recordKillMeta(e,cause,shot=null){
+  if(cause==="pit"){game.stats.pitKills++;if(e.type==="shard")game.stats.shardPitKills++}if(cause==="explosion"){game.stats.explosionKills++;if(e.type==="echo"&&game.stats.echoVolleys===0)game.stats.techFlags.echoBeforeVolley=true}if(cause==="return"||cause==="gold")game.stats.returnKills++;if(e.type==="anchor"&&cause==="pit"&&e.anchorWindows<=1)game.stats.techFlags.firstAnchorWindow=true;game.stats.killCauses.add(cause);if(game.stats.firstKillTick<0)game.stats.firstKillTick=game.stageTick;game.stats.lastKillTick=game.stageTick;if(shot){const n=(game.stats.rootKills.get(shot.rootId)||0)+1;game.stats.rootKills.set(shot.rootId,n);game.stats.maxRootKills=Math.max(game.stats.maxRootKills,n);awardJustLink(shot.rootId,e.x,e.y)}
+}
+function killEnemy(e,cause,shot=null){if(!e.alive)return;e.alive=false;scoreKill(e,cause,baseScore(e.type));recordKillMeta(e,cause,shot);particle(e.x,e.y,cause==="pit"?PALETTE.cyan:PALETTE.gold,18,1.7);audio.sfx("kill")}
+function baseScore(t){return ({turret:100,hound:150,oracle:200,guard:250,splitter:120,shard:90,resonator:250,echo:300,anchor:350,boss:1200})[t]||100}
+function scoreKill(e,cause,base){
+  if(game.stageTick-game.stats.chainTick<=180)game.stats.chain++;else game.stats.chain=1;game.stats.chainTick=game.stageTick;game.stats.maxChain=Math.max(game.stats.maxChain,game.stats.chain);game.stats.kills++;game.stats.killOrder.push(e.dir);const dx=e.x-7,dy=e.y-5,quad=Math.abs(dx)>Math.abs(dy)?(dx>0?1:3):(dy>0?2:0);game.stats.killQuadrants.push(quad);game.stats.lastKillType=e.type;const mult=Math.min(8,game.stats.chain);addScore(base*mult,e.x,e.y,mult>1?`${mult} CHAIN`:`+${base}`);
+}
+
+function hurtPlayer(reason,x,y,instant=false){
+  const p=game.player;if(!p||p.invuln>0||game.mode!=="play")return;p.hp-=instant?3:1;p.invuln=72;p.blink=72;game.stats.damage++;game.deathReason=reason;game.deathCell=[x,y];game.shake=11;game.flash=11;audio.sfx("hurt");particle(p.x,p.y,PALETTE.red,24,2);
+  for(const s of game.shots)if(s.alive&&Math.abs(s.x-p.x)<=1&&Math.abs(s.y-p.y)<=1)s.alive=false;
+  if(p.hp<=0){game.hitStop=12;game.deathDelay=18}else{const candidates=[p.lastSafe,...p.trail.slice().reverse(),[p.x,p.y]],safe=candidates.find(q=>q&&!isWall(q[0],q[1])&&!solidAt(q[0],q[1])&&!isPit(q[0],q[1]));if(safe){p.x=safe[0];p.y=safe[1];p.fromX=p.x;p.fromY=p.y}game.toast=reason;game.toastTick=75}
+}
+
+function reachableFloor(){
+  const start=keyOf(game.player.x,game.player.y),seen=new Set([start]),queue=[[game.player.x,game.player.y]];while(queue.length){const [x,y]=queue.shift();for(const [dx,dy]of DIRS){const nx=x+dx,ny=y+dy,k=keyOf(nx,ny);if(seen.has(k)||isWall(nx,ny)||isPit(nx,ny))continue;seen.add(k);queue.push([nx,ny])}}return seen
+}
+function updateReservePort(){
+  if(objectives()===0&&gateOpen()){game.reserveTick=0;return}const reach=reachableFloor(),weaponReachable=game.shots.some(s=>s.alive&&reach.has(keyOf(s.x,s.y)))||game.bombs.some(b=>b.alive&&reach.has(keyOf(b.x,b.y)));
+  if(weaponReachable){game.reserveTick=0;return}if(++game.reserveTick<120)return;game.reserveTick=30;
+  const p=game.player,cells=[...reach].map(k=>k.split(",").map(Number)).filter(q=>!solidAt(q[0],q[1])&&!isPit(q[0],q[1])&&(q[0]!==p.x||q[1]!==p.y)&&(q[0]===p.x||q[1]===p.y)&&pathClear(q[0],q[1],p.x,p.y));cells.sort((a,b)=>(Math.abs(b[0]-p.x)+Math.abs(b[1]-p.y))-(Math.abs(a[0]-p.x)+Math.abs(a[1]-p.y)));const port=cells[0];
+  if(!port)return;const dir=lineDirTo(port[0],port[1],p.x,p.y),shot=fireShot(port[0],port[1],dir,0,-1);if(shot)shot.step=14;game.stats.reserve=true;game.toast="RESERVE PORT — 救済弾発射";game.toastTick=70;floater(port[0],port[1],"RESERVE",PALETTE.orange)
+}
+
+function updateConveyors(){
+  if(game.stageTick%36!==0)return;const movers=[game.player,...game.enemies.filter(e=>e.alive),...game.objects.filter(o=>o.alive),...game.bombs.filter(b=>b.alive)];const occupied=new Set();
+  for(const v of movers){const d=game.terrain.conveyors.get(keyOf(v.x,v.y));if(d===undefined)continue;const [dx,dy]=DIRS[d],nx=v.x+dx,ny=v.y+dy;if(isWall(nx,ny)||solidAt(nx,ny,v.id)||occupied.has(keyOf(nx,ny)))continue;
+    if(v!==game.player&&nx===game.player.x&&ny===game.player.y){if(v.kind==="enemy")hurtPlayer(`${enemyName(v.type)}がベルトから接触`,nx,ny);continue}if(v===game.player&&enemyAt(nx,ny))continue;
+    const ox=v.x,oy=v.y;v.x=nx;v.y=ny;v.anim={ox,oy,life:6};if("beltDistance" in v)v.beltDistance++;occupied.add(keyOf(nx,ny));if(v===game.player){v.lastSafe=[ox,oy];leaveFragile(ox,oy);if(isPit(nx,ny))hurtPlayer("ベルトから落下",nx,ny,true);else if(game.terrain.sparks.has(keyOf(nx,ny))&&sparkActive())hurtPlayer("ベルト上の放電床",nx,ny)}else if(v.kind==="enemy"&&isPit(nx,ny))killEnemy(v,"pit")}
+  resolveLandings();
+}
+
+function checkExit(){
+  const open=objectives()===0&&gateOpen();if(open&&!game.exitOpen){game.exitOpen=true;game.objectiveDelay=18;game.toast="EXIT CIRCUIT OPEN";game.toastTick=80;audio.sfx("node")}if(game.exitOpen&&game.player.x===game.terrain.exit[0]&&game.player.y===game.terrain.exit[1]&&game.objectiveDelay<=0)finishStage();
+}
+
+function techAchieved(s){
+  const z=game.stats,t=s.local,w=s.world;
+  if(w===0){if(t===1)return z.returnKills>=2;if(t===2)return z.cw>0&&z.ccw>0&&z.damage===0;if(t===3)return z.pitKills>0;if(t===4)return z.crateLost===0;if(t===5)return z.goldLinks>0;if(t===6)return z.rotations<=s.parRot&&z.emptyRotations===0;if(t===7)return z.maxChain>=3&&z.lastKillTick-z.firstKillTick<=150;if(t===8)return z.killQuadrants.slice(0,4).join("")==="0123"}
+  if(w===1){if(t===1)return z.returnKills>=2&&z.mirrorMoves>0;if(t===2)return z.explosionKills>0;if(t===3)return z.backKills>0;if(t===4)return z.explosionKills>0;if(t===5)return z.maxChain>=2;if(t===6)return z.mirrorMoves<=1&&z.goldLinks>0;if(t===7)return z.explosionKills>=2&&z.damage===0;if(t===8)return z.killQuadrants.slice(0,4).join("")==="0123"}
+  if(w===2){if(t===1)return z.shardPitKills>=2;if(t===2)return z.maxRootKills>=2;if(t===3)return z.maxChain>=4;if(t===4)return !!z.techFlags.nodesBeforeKill;if(t===5)return z.lastKillTick-z.firstKillTick<=600;if(t===6)return z.nodeRoots.length>=2&&new Set(z.nodeRoots).size===1;if(t===7)return z.pitKills+z.explosionKills>=2;if(t===8)return z.nodes>=2&&z.damage===0}
+  if(w===3){if(t===1)return z.maxChain>=2;if(t===2)return !!z.techFlags.firstAnchorWindow;if(t===3)return z.rotations<=s.parRot&&!!z.techFlags.firstAnchorWindow;if(t===4)return !!z.techFlags.beltBomb;if(t===5)return z.pitKills>=2;if(t===6)return z.rotations<=s.parRot&&z.explosionKills>=2;if(t===7)return z.maxChain>=4;if(t===8)return !!z.techFlags.circuitCrateBlock}
+  if(w===4){if(t===1)return z.multiMoves>0&&z.maxChain>=3;if(t===2)return z.nodes>=2&&z.damage===0;if(t===3)return !!z.techFlags.echoBeforeVolley;if(t===4)return z.maxChain>=4;if(t===5)return z.lastKillType==="resonator";if(t===6)return z.rotations<=s.parRot&&z.rotations>0&&z.allMixed;if(t===7)return z.damage===0&&z.lastKillTick-z.firstKillTick<=300;if(t===8)return z.killCauses.size>=4&&z.damage===0}
+  return false;
+}
+
+function finishStage(){
+  if(game.mode!=="play")return;game.mode="clear";game.unlockedNotice="";const s=stageDef(),sec=game.stageTick/60,timeMed=sec<=s.par,noDamage=game.stats.damage===0,eff=game.stats.rotations<=s.parRot&&!game.stats.reserve,medals=(timeMed?1:0)|(noDamage?2:0)|(eff?4:0),tech=techAchieved(s),medalCount=(timeMed?1:0)+(noDamage?1:0)+(eff?1:0);let rank=medals===7&&tech?"S":medalCount>=2?"A":medalCount>=1?"B":"C";
+  const bonus=Math.max(0,Math.floor((s.par-sec)*60))+game.player.hp*1000+(noDamage?2000:0)+(eff?1500:0)+(tech?1200:0);game.score+=bonus;if(game.arcade&&noDamage)game.lives=Math.min(5,game.lives+1);game.clearData={sec,medals,tech,rank,bonus};const old=rec(s.id);save.records[s.id]={score:Math.max(old.score,game.score-game.stageStartScore),time:old.time?Math.min(old.time,sec):sec,rank:RANK_VALUE[rank]>RANK_VALUE[old.rank]?rank:old.rank,tech:old.tech||tech,medals:old.medals|medals};if(game.arcade)save.circuitHigh=Math.max(save.circuitHigh,game.score);else save.highScore=Math.max(save.highScore,game.score);unlockAfter(s.id);writeSave();audio.sfx("clear");announce(`ステージクリア。ランク${rank}`)
+}
+
+function activeDir(){const p=input.pressed,d=input.down;const order=[["up","w",0],["down","s",2],["left","a",3],["right","d",1]];for(const [a,b,n]of order)if(p.has(a)||p.has(b))return n;for(const [a,b,n]of order)if(d.has(a)||d.has(b))return n;return -1}
+function pressed(...ks){return ks.some(k=>input.pressed.has(k))}
+
+function tickPlay(){
+  game.stageTick++;audio.tick(stageDef().world,true);if(game.toastTick>0)game.toastTick--;if(game.flash>0)game.flash--;if(game.shake>0)game.shake--;if(game.objectiveDelay>0)game.objectiveDelay--;if(game.spinCooldown>0)game.spinCooldown--;if(game.moveCooldown>0)game.moveCooldown--;if(game.player.invuln>0)game.player.invuln--;if(game.player.move>0)game.player.move--;
+  for(const v of [...game.enemies,...game.objects,...game.shots,...game.bombs]){if(v.anim&&--v.anim.life<=0)v.anim=null;if(v.flash>0)v.flash--}
+  if(game.player.hp<=0){if(game.hitStop>0)game.hitStop--;if(--game.deathDelay<=0){game.mode="death";game.lives--;announce(`ミス。原因: ${game.deathReason}`)}updateVisuals();return}
+  if(pressed("escape","p")){game.mode="pause";audio.sfx("ui");return}
+  if(input.down.has("r")&&!game.arcade){if(++game.restartHold>=30){game.score=game.stageStartScore;loadStage(game.stageId);audio.sfx("ui");return}}else game.restartHold=0;
+  if(game.hitStop>0){game.hitStop--;updateVisuals();return}
+  let spun=false;if(pressed("z","j"))spun=tryOrbit(1);else if(pressed("x","k"))spun=tryOrbit(-1);else if(game.spinCooldown===0&&game.spinBuffer){const b=game.spinBuffer;game.spinBuffer=0;spun=tryOrbit(b)}
+  if(!spun&&game.moveCooldown<=0){const d=activeDir();if(d>=0)movePlayer(d)}
+  for(const e of game.enemies)updateEnemy(e);updateShots();updateBombs();updateReservePort();updateConveyors();resolveLandings();checkExit();updateVisuals();
+  game.enemies=game.enemies.filter(e=>e.alive||e.flash>0);game.objects=game.objects.filter(o=>o.alive);game.shots=game.shots.filter(s=>s.alive);game.bombs=game.bombs.filter(b=>b.alive);if(game.shots.length>96)game.shots.splice(0,game.shots.length-96);
+}
+function updateVisuals(){for(const p of game.particles){p.x+=p.vx;p.y+=p.vy;p.vy+=.002;p.life--}game.particles=game.particles.filter(p=>p.life>0);for(const f of game.floaters){f.y-=.012;f.life--}game.floaters=game.floaters.filter(f=>f.life>0)}
+
+function tickMenu(){
+  if(game.mode==="title"){
+    if(pressed("enter","z")){audio.sfx("ui");game.mode="select";game.selectId=Math.max(...save.unlocked)}else if(pressed("c")&&save.circuitUnlocked){audio.sfx("ui");startCircuit()}else if(pressed("h")){game.mode="help";audio.sfx("ui")}else if(pressed("m")){save.settings.music=!save.settings.music;writeSave();audio.sfx("ui")}
+  }else if(game.mode==="select"){
+    let id=game.selectId;if(pressed("left","a"))id--;if(pressed("right","d"))id++;if(pressed("up","w"))id-=8;if(pressed("down","s"))id+=8;id=clamp(id,1,STAGE_TOTAL);if(id!==game.selectId){game.selectId=id;audio.sfx("ui")}
+    if(pressed("enter","z")&&isUnlocked(id)){game.score=0;game.lives=3;game.arcade=false;loadStage(id);audio.sfx("ui")}else if(pressed("escape","x")){game.mode="title";audio.sfx("ui")}else if(pressed("h"))game.mode="help";
+  }else if(game.mode==="help"){
+    if(pressed("escape","x","h","enter","z")){game.mode="title";audio.sfx("ui")}
+  }else if(game.mode==="brief"){
+    if(pressed("enter","z")){game.mode="play";input.pressed.clear();audio.sfx("ui");announce("作戦開始") }else if(pressed("escape","x")){if(game.arcade)abandonCircuit();else game.mode="select";audio.sfx("ui")}
+  }else if(game.mode==="pause"){
+    if(pressed("escape","p","enter","z")){game.mode="play";input.pressed.clear();audio.sfx("ui")}else if(pressed("r")&&!game.arcade){game.score=game.stageStartScore;loadStage(game.stageId)}else if(pressed("q")){if(game.arcade)abandonCircuit();else game.mode="select";audio.sfx("ui")}
+  }else if(game.mode==="death"){
+    if(pressed("enter","z","r")){if(game.lives>0){game.score=game.stageStartScore;loadStage(game.stageId,true)}else{persistRunScore();game.mode="gameover";audio.sfx("gameover")}}else if(pressed("escape","x")){if(game.arcade)abandonCircuit();else game.mode="select"}
+  }else if(game.mode==="gameover"){
+    if(pressed("enter","z")){if(game.arcade){game.arcade=false;game.mode="title"}else{game.lives=3;game.score=Math.floor(game.score/2);game.stageStartScore=game.score;loadStage(game.stageId,true);game.stageStartScore=game.score}}else if(pressed("escape","x")){game.arcade=false;game.mode="title"}
+  }else if(game.mode==="clear"){
+    if(pressed("enter","z")){
+      if(game.arcade){game.circuitPos++;if(game.circuitPos>=CIRCUIT_ROUTE.length)game.mode="ending";else{loadStage(CIRCUIT_ROUTE[game.circuitPos]);game.stageStartScore=game.score}}
+      else{const n=(game.stageId-1)%8+1;if(game.stageId===STAGE_TOTAL){game.mode="ending"}else if(n===5||n===6||n===7){game.mode="select";game.selectId=Math.min(STAGE_TOTAL,game.stageId+1)}else{const next=game.stageId+1;if(isUnlocked(next))loadStage(next);else game.mode="select"}}audio.sfx("ui")
+    }else if(pressed("r")&&!game.arcade){game.score=game.stageStartScore;loadStage(game.stageId)}else if(pressed("escape","x")){if(game.arcade)abandonCircuit();else{game.mode="select";game.selectId=game.stageId}}
+  }else if(game.mode==="ending"){
+    if(pressed("enter","z","escape","x")){persistRunScore();game.arcade=false;game.mode="title";audio.sfx("ui")}
+  }
+}
+
+function fixedTick(){game.tick++;pollGamepad();if(game.mode==="play")tickPlay();else tickMenu();input.pressed.clear();input.released.clear()}
+
+function rect(x,y,w,h,fill){ctx.fillStyle=fill;ctx.fillRect(x,y,w,h)}
+function text(t,x,y,size=20,color=PALETTE.ink,align="left",font="bold"){ctx.fillStyle=color;ctx.font=`${font} ${size}px "Yu Gothic UI","Meiryo",monospace`;ctx.textAlign=align;ctx.textBaseline="middle";ctx.fillText(t,x,y)}
+function strokeText(t,x,y,size,color,stroke,align="left"){ctx.font=`900 ${size}px "Yu Gothic UI","Meiryo",monospace`;ctx.textAlign=align;ctx.textBaseline="middle";ctx.lineWidth=5;ctx.strokeStyle=stroke;ctx.strokeText(t,x,y);ctx.fillStyle=color;ctx.fillText(t,x,y)}
+function line(x1,y1,x2,y2,color,w=2){ctx.strokeStyle=color;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke()}
+function poly(points,fill,stroke=null,w=2){ctx.beginPath();ctx.moveTo(points[0][0],points[0][1]);for(let i=1;i<points.length;i++)ctx.lineTo(points[i][0],points[i][1]);ctx.closePath();ctx.fillStyle=fill;ctx.fill();if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=w;ctx.stroke()}}
+function cellXY(x,y){return [BOARD_X+x*TILE,BOARD_Y+y*TILE]}
+function centerXY(x,y){return [BOARD_X+(x+.5)*TILE,BOARD_Y+(y+.5)*TILE]}
+
+function drawBackdrop(){rect(0,0,W,H,PALETTE.bg);for(let y=0;y<H;y+=4){ctx.fillStyle=y%8?"#07101d":"#081421";ctx.fillRect(0,y,W,1)}ctx.globalAlpha=.08;for(let i=0;i<50;i++){const x=(i*197+game.tick*.15)%W,y=(i*83)%H;rect(x,y,2,2,PALETTE.cyan)}ctx.globalAlpha=1}
+function drawHeader(){
+  const s=stageDef();rect(0,0,W,102,"#07111f");rect(0,98,W,4,WORLDS[s.world].color);text("ORBITAL REPRISAL",38,31,22,PALETTE.ink);text(game.arcade?`CIRCUIT ${game.circuitPos+1}/${CIRCUIT_ROUTE.length}`:`SECTOR ${s.world+1}-${s.local}`,38,70,26,WORLDS[s.world].color);text(s.name,game.arcade?308:258,69,24,PALETTE.white);
+  text(String(game.score).padStart(8,"0"),758,29,24,PALETTE.gold,"right");text("SCORE",758,62,13,PALETTE.muted,"right");
+  text(`${Math.floor(game.stageTick/3600).toString().padStart(2,"0")}:${Math.floor(game.stageTick/60%60).toString().padStart(2,"0")}`,890,29,24,PALETTE.ink,"right");text(`PAR ${s.par}s`,890,62,13,PALETTE.muted,"right");
+  for(let i=0;i<3;i++){const x=934+i*34,y=25;ctx.beginPath();ctx.arc(x,y,11,0,Math.PI*2);ctx.fillStyle=i<game.player.hp?PALETTE.cyan:"#173044";ctx.fill();ctx.lineWidth=2;ctx.strokeStyle="#8df7ff";ctx.stroke()}text(`LIFE ${Math.max(0,game.lives)}`,1033,62,13,PALETTE.muted,"center");
+}
+
+function drawTile(x,y){
+  const [px,py]=cellXY(x,y),k=keyOf(x,y),alt=(x+y)&1;rect(px,py,TILE,TILE,alt?PALETTE.floor:PALETTE.floor2);rect(px,py,TILE,1,"#1a3b50");rect(px,py,1,TILE,"#1a3b50");
+  if(game.terrain.pits.has(k)&&!game.terrain.bridges.has(k)){rect(px+3,py+3,TILE-6,TILE-6,PALETTE.pit);for(let r=17;r>4;r-=6){ctx.strokeStyle=`rgba(64,239,255,${.06+r/180})`;ctx.lineWidth=2;ctx.strokeRect(px+24-r/2,py+24-r/2,r,r)}}
+  if(game.terrain.bridges.has(k)){rect(px+4,py+7,TILE-8,TILE-14,"#365b66");for(let i=0;i<4;i++)rect(px+7+i*10,py+8,5,TILE-16,"#5e8790")}
+  if(game.terrain.fragile.has(k)){const n=game.terrain.fragile.get(k);ctx.strokeStyle=n===1?PALETTE.orange:"#68869a";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(px+5,py+8);ctx.lineTo(px+22,py+20);ctx.lineTo(px+14,py+42);ctx.moveTo(px+22,py+20);ctx.lineTo(px+42,py+11);ctx.moveTo(px+22,py+20);ctx.lineTo(px+39,py+39);ctx.stroke()}
+  if(game.terrain.sparks.has(k)){const on=sparkActive();ctx.globalAlpha=on?.9:.25;for(let i=0;i<3;i++)line(px+8,py+12+i*12,px+40,py+5+i*12,on?PALETTE.red:PALETTE.muted,3);ctx.globalAlpha=1}
+  if(game.terrain.conveyors.has(k)){const d=game.terrain.conveyors.get(k),[dx,dy]=DIRS[d],cx=px+24,cy=py+24;ctx.globalAlpha=.65;for(let j=-1;j<=1;j++){const ox=dy*j*9,oy=-dx*j*9;poly([[cx+ox+dx*14,cy+oy+dy*14],[cx+ox-dx*9+dy*6,cy+oy-dy*9-dx*6],[cx+ox-dx*9-dy*6,cy+oy-dy*9+dx*6]],"#4e91a5")}ctx.globalAlpha=1}
+  if(game.terrain.nodes.has(k)){const on=game.terrain.nodes.get(k);ctx.beginPath();ctx.arc(px+24,py+24,13,0,Math.PI*2);ctx.fillStyle=on?PALETTE.gold:"#162434";ctx.fill();ctx.lineWidth=3;ctx.strokeStyle=on?"#fff0a0":"#617386";ctx.stroke();for(let i=0;i<4;i++){const a=i*Math.PI/2;line(px+24+Math.cos(a)*16,py+24+Math.sin(a)*16,px+24+Math.cos(a)*21,py+24+Math.sin(a)*21,on?PALETTE.gold:PALETTE.muted,2)}}
+  if(game.terrain.gates.has(k)){const open=gateOpen();ctx.globalAlpha=open?.22:1;rect(px+5,py+4,TILE-10,TILE-8,"#14293b");for(let i=0;i<4;i++)rect(px+8+i*9,py+5,4,TILE-10,open?PALETTE.green:PALETTE.red);ctx.globalAlpha=1}
+  if(x===game.terrain.exit[0]&&y===game.terrain.exit[1]){const on=game.exitOpen;ctx.strokeStyle=on?PALETTE.green:"#41566a";ctx.lineWidth=4;ctx.strokeRect(px+9,py+9,30,30);ctx.fillStyle=on?`rgba(104,240,165,${.22+.12*Math.sin(game.tick*.18)})`:"#101a26";ctx.fillRect(px+13,py+13,22,22);text(on?"GO":"×",px+24,py+25,11,on?PALETTE.green:PALETTE.muted,"center")}
+}
+
+function drawWall(x,y){const [px,py]=cellXY(x,y);rect(px,py,TILE,TILE,PALETTE.wall);rect(px+4,py+4,TILE-8,TILE-8,"#1b3045");rect(px+4,py+4,TILE-8,5,PALETTE.wallHi);rect(px+8,py+14,12,4,"#385773");rect(px+27,py+28,13,4,"#385773")}
+function drawOrbitGuide(){
+  const p=game.player;let locked=anchoredBlocks(p.x,p.y);for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if((dx||dy)&&isWall(p.x+dx,p.y+dy))locked=true;ctx.save();ctx.globalAlpha=game.spinCooldown>0?.12:.28;ctx.strokeStyle=locked?PALETTE.red:PALETTE.cyan;ctx.lineWidth=2;ctx.setLineDash(game.spinCooldown>0?[3,5]:[]);for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if(dx||dy){const [x,y]=cellXY(p.x+dx,p.y+dy);ctx.strokeRect(x+4,y+4,TILE-8,TILE-8)}ctx.restore()
+}
+function drawBoard(){
+  rect(BOARD_X-6,BOARD_Y-6,COLS*TILE+12,ROWS*TILE+12,"#02070c");for(let y=0;y<ROWS;y++)for(let x=0;x<COLS;x++){if(x===0||y===0||x===COLS-1||y===ROWS-1||game.terrain.walls.has(keyOf(x,y)))drawWall(x,y);else drawTile(x,y)}
+  drawOrbitGuide();drawThreats();for(const o of game.objects)if(o.alive)drawObject(o);for(const b of game.bombs)if(b.alive)drawBomb(b);for(const e of game.enemies)if(e.alive)drawEnemy(e);for(const s of game.shots)if(s.alive)drawShot(s);drawPlayer();drawParticles();
+}
+
+function drawObject(o){const [cx,cy]=centerXY(o.x,o.y);if(o.type==="crate"){rect(cx-17,cy-17,34,34,o.flash?PALETTE.gold:"#8d613e");rect(cx-12,cy-12,24,24,"#513a2b");line(cx-12,cy-12,cx+12,cy+12,"#b98a59",4);line(cx+12,cy-12,cx-12,cy+12,"#b98a59",4)}else{ctx.save();ctx.translate(cx,cy);ctx.rotate(o.dir%2?Math.PI/4:-Math.PI/4);rect(-22,-5,44,10,"#a7eaff");rect(-18,-2,36,4,"#f5ffff");ctx.restore();ctx.strokeStyle=PALETTE.cyan;ctx.lineWidth=1;ctx.strokeRect(cx-20,cy-20,40,40)}drawGhost(o)}
+function drawEnemy(e){
+  const [cx,cy]=centerXY(e.x,e.y),flash=e.flash>0&&e.flash%2===0;ctx.save();ctx.translate(cx,cy);const col=flash?PALETTE.white:enemyColor(e.type);
+  if(e.type==="turret"){ctx.rotate((e.dir-1)*Math.PI/2);poly([[-17,-15],[12,-15],[18,0],[12,15],[-17,15]],"#24384e",col,3);rect(0,-5,23,10,col);rect(-10,-7,17,14,"#0a1724")}
+  else if(e.type==="hound"){poly([[0,-19],[17,-5],[12,16],[0,11],[-12,16],[-17,-5]],"#391c35",col,3);poly([[0,-11],[8,-2],[0,7],[-8,-2]],col)}
+  else if(e.type==="oracle"){ctx.beginPath();ctx.arc(0,0,17,0,Math.PI*2);ctx.fillStyle="#35273c";ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=3;ctx.stroke();ctx.beginPath();ctx.arc(0,0,7,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();line(-14,12,14,-12,col,2)}
+  else if(e.type==="guard"){ctx.rotate((e.dir-1)*Math.PI/2);rect(-14,-15,25,30,"#2b334d");poly([[8,-20],[20,-13],[20,13],[8,20]],col);rect(-8,-5,12,10,"#0c1726")}
+  else if(e.type==="splitter"||e.type==="shard"){const r=e.type==="shard"?10:18;poly([[0,-r],[r,0],[0,r],[-r,0]],"#4b2e1d",col,3);line(-r+3,0,r-3,0,col,2);line(0,-r+3,0,r-3,col,2)}
+  else if(e.type==="resonator"){for(let i=0;i<3;i++){ctx.rotate(Math.PI*2/3);poly([[0,-19],[7,-5],[-7,-5]],col)}ctx.beginPath();ctx.arc(0,0,8,0,Math.PI*2);ctx.fillStyle="#152435";ctx.fill();ctx.strokeStyle=col;ctx.stroke();ctx.beginPath();ctx.arc(0,0,13,e.dir%2?.2:Math.PI+.2,e.dir%2?Math.PI*1.45:Math.PI*2.45);ctx.lineWidth=2;ctx.stroke();poly(e.dir%2?[[13,-6],[19,-2],[13,2]]:[[-13,6],[-19,2],[-13,-2]],col)}
+  else if(e.type==="echo"){ctx.strokeStyle=col;ctx.lineWidth=4;ctx.beginPath();ctx.arc(0,0,17,.4,Math.PI*1.65);ctx.stroke();poly([[15,-11],[20,-2],[10,-4]],col);ctx.beginPath();ctx.arc(0,0,6,0,Math.PI*2);ctx.fillStyle=col;ctx.fill()}
+  else if(e.type==="anchor"){const root=anchorRoot(e);poly([[0,-20],[18,-8],[14,17],[0,12],[-14,17],[-18,-8]],root?"#351d52":"#33445b",col,3);rect(-5,-19,10,34,root?PALETTE.violet:PALETTE.white);if(root){ctx.strokeStyle=PALETTE.violet;ctx.lineWidth=2;ctx.strokeRect(-22,-22,44,44)}}
+  else if(e.type==="boss"){for(let i=0;i<4;i++){ctx.rotate(Math.PI/2);poly([[0,-25],[10,-12],[-10,-12]],col)}ctx.beginPath();ctx.arc(0,0,15,0,Math.PI*2);ctx.fillStyle="#190d29";ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=4;ctx.stroke();text(String(e.hp),0,1,14,col,"center");const [pdx,pdy]=DIRS[e.port];poly([[pdx*28-pdy*5,pdy*28+pdx*5],[pdx*36,pdy*36],[pdx*28+pdy*5,pdy*28-pdx*5]],PALETTE.gold)}
+  ctx.restore();drawGhost(e);
+  if(e.state!=="idle"){const pct=clamp(e.wind/(e.windMax||1),0,1);ctx.strokeStyle=e.redirected?PALETTE.cyan:PALETTE.red;ctx.lineWidth=3;ctx.beginPath();ctx.arc(cx,cy,22,-Math.PI/2,-Math.PI/2+Math.PI*2*(1-pct));ctx.stroke()}
+  if(linkedShield(e)){ctx.strokeStyle=PALETTE.gold;ctx.lineWidth=2;ctx.setLineDash([4,4]);ctx.strokeRect(cx-21,cy-21,42,42);ctx.setLineDash([])}
+}
+function enemyColor(t){return ({turret:"#ff667d",hound:"#ff8a60",oracle:"#e27aff",guard:"#68d8ff",splitter:"#ffbe58",shard:"#ffcf77",resonator:"#ffe86a",echo:"#bd7cff",anchor:"#d7adff",boss:"#ff6de8"})[t]||PALETTE.red}
+function drawGhost(v){if(!v.anim)return;const a=v.anim.life/7,[ox,oy]=centerXY(v.anim.ox,v.anim.oy),[cx,cy]=centerXY(v.x,v.y);ctx.globalAlpha=.12+.18*a;ctx.strokeStyle=v.kind==="shot"?v.color:PALETTE.cyan;ctx.lineWidth=3;ctx.beginPath();ctx.arc(ox+(cx-ox)*(1-a),oy+(cy-oy)*(1-a),14,0,Math.PI*2);ctx.stroke();ctx.globalAlpha=1}
+function drawShot(s){const [cx,cy]=centerXY(s.x,s.y),[dx,dy]=DIRS[s.dir];ctx.globalAlpha=.25;line(cx-dx*17,cy-dy*17,cx+dx*7,cy+dy*7,s.color,s.level>=2?9:7);ctx.globalAlpha=1;ctx.beginPath();ctx.arc(cx,cy,s.level>=2?7:6,0,Math.PI*2);ctx.fillStyle=s.color;ctx.fill();ctx.strokeStyle="#fff";ctx.lineWidth=1;ctx.stroke();if(s.level>=2){ctx.strokeStyle=PALETTE.gold;ctx.beginPath();ctx.arc(cx,cy,12+Math.sin(game.tick*.3)*2,0,Math.PI*2);ctx.stroke()}drawGhost(s)}
+function drawBomb(b){const [cx,cy]=centerXY(b.x,b.y),r=10+Math.sin(game.tick*.3)*2;ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fillStyle=b.armed?PALETTE.gold:PALETTE.orange;ctx.fill();ctx.strokeStyle="#fff";ctx.lineWidth=2;ctx.stroke();text(String(Math.max(1,Math.ceil(b.fuse/30))),cx,cy,10,"#12131a","center")}
+function drawPlayer(){
+  const p=game.player,[cx,cy]=centerXY(p.x,p.y),blink=p.invuln>0&&Math.floor(p.invuln/4)%2===0;if(blink)ctx.globalAlpha=.3;
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(game.lastMoveDir*Math.PI/2);poly([[0,-19],[15,13],[0,8],[-15,13]],"#0e526a",PALETTE.cyan,3);poly([[0,-11],[7,6],[0,2],[-7,6]],PALETTE.white);ctx.restore();ctx.globalAlpha=1;
+  const ready=game.spinCooldown<=0,rad=26;ctx.strokeStyle=ready?`rgba(64,239,255,${.35+.2*Math.sin(game.tick*.2)})`:"rgba(64,90,110,.25)";ctx.lineWidth=2;ctx.beginPath();ctx.arc(cx,cy,rad,0,Math.PI*2);ctx.stroke();
+  if(game.restartHold>0){ctx.strokeStyle=PALETTE.red;ctx.lineWidth=4;ctx.beginPath();ctx.arc(cx,cy,31,-Math.PI/2,-Math.PI/2+Math.PI*2*game.restartHold/30);ctx.stroke()}
+}
+function drawThreats(){for(const e of game.enemies)if(e.alive&&e.state!=="idle"){
+  if(e.state==="fire"||e.state==="bossFire"){const [cx,cy]=centerXY(e.x,e.y),[dx,dy]=DIRS[e.attackDir];ctx.globalAlpha=.22;line(cx,cy,cx+dx*TILE*12,cy+dy*TILE*12,e.redirected?PALETTE.cyan:PALETTE.red,5);ctx.globalAlpha=1}
+  if(e.state==="bite"||e.state==="shieldBash"){const [dx,dy]=DIRS[e.attackDir],[px,py]=cellXY(e.x+dx,e.y+dy);ctx.globalAlpha=.35;rect(px+5,py+5,TILE-10,TILE-10,PALETTE.red);ctx.globalAlpha=1}
+  if(e.state==="bomb"&&e.target){const [cx,cy]=centerXY(...e.target);ctx.strokeStyle=PALETTE.orange;ctx.lineWidth=3;ctx.beginPath();ctx.arc(cx,cy,16+Math.sin(game.tick*.3)*4,0,Math.PI*2);ctx.stroke();line(cx-10,cy,cx+10,cy,PALETTE.orange,2);line(cx,cy-10,cx,cy+10,PALETTE.orange,2)}
+}}
+function drawParticles(){for(const p of game.particles){ctx.globalAlpha=clamp(p.life/20,0,1);rect(BOARD_X+p.x*TILE-p.size/2,BOARD_Y+p.y*TILE-p.size/2,p.size,p.size,p.color)}ctx.globalAlpha=1;for(const f of game.floaters){ctx.globalAlpha=clamp(f.life/25,0,1);text(f.text,BOARD_X+f.x*TILE,BOARD_Y+f.y*TILE,13,f.color,"center")}ctx.globalAlpha=1}
+
+function drawSide(){
+  const x=796;rect(x,118,332,558,"#091524");rect(x+8,126,316,84,"#0d2031");text("OBJECTIVE",x+24,146,13,PALETTE.muted);text(objectives()?`TARGETS  ${objectives()}`:"EXITへ到達",x+24,178,24,objectives()?PALETTE.red:PALETTE.green);
+  text("ORBIT STATUS",x+24,238,13,PALETTE.muted);const ready=game.spinCooldown<=0;text(ready?"READY":"RECHARGE",x+24,269,21,ready?PALETTE.cyan:PALETTE.muted);for(let i=0;i<14;i++)rect(x+24+i*18,288,13,5,i>=game.spinCooldown?PALETTE.cyan:"#21394a");
+  const liveChain=game.stageTick-game.stats.chainTick<=180?game.stats.chain:0;text("CHAIN",x+24,326,13,PALETTE.muted);text(liveChain?`×${liveChain}`:"—",x+24,357,27,liveChain>1?PALETTE.gold:PALETTE.ink);text(`BEST ×${Math.max(1,game.stats.maxChain)}`,x+115,357,14,PALETTE.muted);
+  text("TACTICAL LOG",x+24,404,13,PALETTE.muted);let logs=[];if(game.terrain.nodes.size)logs.push(`NODES ${[...game.terrain.nodes.values()].filter(Boolean).length}/${game.terrain.nodes.size}`);if(game.enemies.some(e=>e.type==="anchor"&&e.alive))logs.push("ANCHOR窓を監視");if(game.enemies.some(e=>e.type==="resonator"&&e.alive))logs.push("共鳴シールド作動");if(game.stats.just)logs.push(`JUST RETURN ${game.stats.just}`);if(!logs.length)logs=["射線と8マスを読む","向きは公転しても不変"];logs.slice(0,4).forEach((t,i)=>text("• "+t,x+24,435+i*25,14,i?PALETTE.muted:PALETTE.ink));
+  rect(x+16,560,300,92,"#07111d");text("MOVE",x+28,581,12,PALETTE.muted);text("矢印 / WASD",x+116,581,13,PALETTE.ink);text("CW  Z/J",x+28,610,13,PALETTE.cyan);text("CCW  X/K",x+162,610,13,PALETTE.gold);text(game.arcade?"1 CREDIT / リトライ不可   ESC ポーズ":"R長押し リトライ   ESC ポーズ",x+28,638,12,PALETTE.muted);
+}
+
+function drawPlay(){drawBackdrop();ctx.save();if(save.settings.shake&&game.shake>0){const sx=Math.sin(game.tick*12.9898)*.5,sy=Math.sin(game.tick*78.233+1.7)*.5;ctx.translate(sx*game.shake,sy*game.shake)}drawHeader();drawBoard();drawSide();ctx.restore();if(game.toastTick>0){const a=clamp(game.toastTick/15,0,1);ctx.globalAlpha=a;rect(300,617,552,48,"rgba(3,8,14,.9)");text(game.toast,576,641,19,game.toast.includes("BLOCK")||game.toast.includes("LOCK")?PALETTE.red:PALETTE.cyan,"center");ctx.globalAlpha=1}if(game.flash>0){ctx.globalAlpha=game.flash/28;rect(0,0,W,H,game.deathCell?PALETTE.red:PALETTE.white);ctx.globalAlpha=1}}
+
+function drawTitle(){
+  drawBackdrop();ctx.save();ctx.translate(576,260);for(let i=0;i<8;i++){ctx.rotate(Math.PI/4);const pulse=5*Math.sin(game.tick*.03+i);rect(-8,-116+pulse,16,34,i%2?PALETTE.cyan:PALETTE.violet)}ctx.restore();ctx.beginPath();ctx.arc(576,260,62,0,Math.PI*2);ctx.fillStyle="#08172a";ctx.fill();ctx.strokeStyle=PALETTE.cyan;ctx.lineWidth=5;ctx.stroke();poly([[576,218],[608,281],[576,269],[544,281]],"#0d5771",PALETTE.white,3);
+  strokeText("環 撃 軌 道",576,112,54,PALETTE.white,"#07101d","center");text("ORBITAL REPRISAL",576,164,24,PALETTE.cyan,"center");text("危険を回し、射線を奪え。",576,364,22,PALETTE.ink,"center");if(BETA)text("BETA VERSION  —  1-1〜2-8 / 全16作戦",576,406,16,PALETTE.violet,"center");
+  const pulse=.65+.35*Math.sin(game.tick*.08);ctx.globalAlpha=pulse;text("ENTER / Z  START",576,444,24,PALETTE.gold,"center");ctx.globalAlpha=1;if(save.circuitUnlocked)text("C  CIRCUIT MODE  —  3機・8区画連戦",576,487,16,PALETTE.cyan,"center");text("H  操作・法則",576,save.circuitUnlocked?520:493,16,PALETTE.muted,"center");text(`M  MUSIC ${save.settings.music?"ON":"OFF"}`,576,save.circuitUnlocked?550:524,14,PALETTE.muted,"center");
+  text(`到達 ${Math.min(save.maxStage,STAGE_TOTAL)}/${STAGE_TOTAL}`,54,665,15,PALETTE.muted);text(`HIGH SCORE ${String(save.highScore).padStart(8,"0")}`,1098,651,15,PALETTE.gold,"right");if(save.circuitUnlocked)text(`CIRCUIT ${String(save.circuitHigh).padStart(8,"0")}`,1098,675,13,PALETTE.cyan,"right");text("© 2026 TOTE AI TOOLS",576,674,11,"#486579","center");if(game.debugFailures.length)text(`SELF CHECK ${game.debugFailures.length} ERROR`,576,702,12,PALETTE.red,"center")
+}
+
+function drawSelect(){
+  drawBackdrop();text("STAGE MATRIX",48,52,34,PALETTE.white);text(BETA?"2 SECTORS / 16 MISSIONS  —  BETA":"5 SECTORS / 40 MISSIONS",48,86,15,BETA?PALETTE.violet:PALETTE.muted);text("ESC 戻る  H 操作",1098,64,14,PALETTE.muted,"right");
+  for(let w=0;w<5;w++){const y=146+w*104;if(w>=WORLD_TOTAL){text(`0${w+1}`,55,y,17,"#38566d");text(WORLDS[w].name,88,y,16,"#38566d");text(WORLDS[w].sub,88,y+27,11,"#2c4759");rect(340,y-25,730,66,"#09121e");text("COMING SOON — 制作中",705,y+14,17,"#456780","center");continue}text(`0${w+1}`,55,y,17,WORLDS[w].color);text(WORLDS[w].name,88,y,16,PALETTE.ink);text(WORLDS[w].sub,88,y+27,11,PALETTE.muted);if(worldMaster(w))text("MASTER",267,y+27,10,PALETTE.gold,"right");for(let n=1;n<=8;n++){const id=w*8+n,x=340+(n-1)*94,sel=id===game.selectId,open=isUnlocked(id),r=rec(id);rect(x,y-25,72,66,sel?"#193c53":open?"#0d2332":"#09121e");if(sel){ctx.strokeStyle=WORLDS[w].color;ctx.lineWidth=3;ctx.strokeRect(x-2,y-27,76,70)}text(open?String(n):"LOCK",x+36,y-4,open?23:10,open?WORLDS[w].color:"#314355","center");text(r.rank==="-"?"—":r.rank,x+36,y+24,15,r.rank==="S"?PALETTE.gold:PALETTE.muted,"center");if(r.tech){ctx.beginPath();ctx.arc(x+61,y-14,5,0,Math.PI*2);ctx.fillStyle=PALETTE.gold;ctx.fill()}}}
+  const s=STAGES[game.selectId-1],open=isUnlocked(game.selectId),r=rec(game.selectId);rect(40,653,1072,48,"#0b1928");text(open?`${s.world+1}-${s.local}  ${s.name}`:"LOCKED",58,677,19,open?PALETTE.white:PALETTE.muted);if(open)text(`BEST ${r.rank}  ${r.time?r.time.toFixed(1)+"s":"--"}   ${r.tech?"TECH取得":"TECH未取得"}`,1090,677,15,r.tech?PALETTE.gold:PALETTE.muted,"right")
+}
+
+function drawHelp(){
+  drawBackdrop();text("PILOT MANUAL",64,58,34,PALETTE.white);text("H / ENTER / ESC  戻る",1088,61,14,PALETTE.muted,"right");
+  const cols=[64,584],ys=122;const rules=[
+    ["01  公転",`Zで時計回り、Xで反時計回り。自機を中心に周囲8マスの敵・弾・箱・鏡・爆弾が90°移る。向きは変わらない。`],
+    ["02  RETURN",`赤い敵弾を公転するとシアンの返弾になり、敵にも当たる。二度捕まえると金弾になり、一体を貫く。自分にも危険。`],
+    ["03  RING LOCK",`8マスのどこかに壁・閉門・固定中アンカーがあると公転不能。赤い輪と拒否音が理由を示す。`],
+    ["04  上達",`安全重視なら射手を早く倒す。得点狙いなら危険な弾源を残し、JUST RETURNとCHAINを狙う。`],
+    ["05  地形",`穴は敵を倒し、箱なら橋になる。鏡は弾を曲げる。返弾でノードを点灯すると門が開く。崩落床とベルトは位置を変える。`],
+    ["06  敵の規則",`全攻撃に予告がある。盾は背面、分裂体は爆発か穴、共鳴体は周囲を守る。固定敵は白いLOOSE表示が攻撃窓。`]
+  ];rules.forEach((r,i)=>{const x=cols[i%2],y=ys+Math.floor(i/2)*172;rect(x,y,474,142,"#0b1b2b");text(r[0],x+20,y+27,19,i%2?PALETTE.gold:PALETTE.cyan);wrapText(r[1],x+20,y+59,434,20,14,PALETTE.ink)});
+}
+function wrapText(str,x,y,max,lineH,size,color){let line="",yy=y;for(const ch of str){const test=line+ch;ctx.font=`bold ${size}px "Yu Gothic UI","Meiryo",monospace`;if(ctx.measureText(test).width>max){text(line,x,yy,size,color);line=ch;yy+=lineH}else line=test}if(line)text(line,x,yy,size,color)}
+
+function drawBrief(){
+  const s=stageDef(),wc=WORLDS[s.world];drawBackdrop();text(`SECTOR ${s.world+1}-${s.local}`,64,62,18,wc.color);strokeText(s.name,64,125,42,PALETTE.white,"#06101a");text(wc.name+" — "+wc.sub,66,173,18,PALETTE.muted);
+  rect(62,220,1028,183,"#0b1c2c");text("MISSION QUESTION",86,251,13,wc.color);wrapText(s.intent,86,294,944,34,23,PALETTE.white);
+  rect(62,427,498,132,"#0a1725");text("TECH SIGNAL",86,454,13,PALETTE.gold);wrapText(s.tech,86,489,450,25,16,PALETTE.ink);rect(582,427,508,132,"#0a1725");text("TARGET",606,454,13,PALETTE.cyan);text(`TIME ${s.par}s`,606,493,21,PALETTE.white);text(`ORBIT ${s.parRot}以内`,790,493,21,PALETTE.white);
+  const pulse=.6+.4*Math.sin(game.tick*.08);ctx.globalAlpha=pulse;text("ENTER / Z  DEPLOY",576,632,24,PALETTE.gold,"center");ctx.globalAlpha=1;text(game.arcade?"ESC / X  CIRCUITを終了":"ESC / X  MATRIXへ戻る",576,676,13,PALETTE.muted,"center")
+}
+
+function overlay(title,sub,color=PALETTE.white){rect(0,0,W,H,"rgba(2,5,10,.78)");strokeText(title,576,265,48,color,"#02050a","center");text(sub,576,324,18,PALETTE.ink,"center")}
+function drawPause(){drawPlay();overlay("PAUSE",game.arcade?"ENTER / ESC 再開   Q CIRCUIT終了":"ENTER / ESC 再開   R リトライ   Q MATRIX",PALETTE.cyan)}
+function drawDeath(){drawPlay();if(game.deathCell){const [cx,cy]=centerXY(...game.deathCell);ctx.strokeStyle=PALETTE.red;ctx.lineWidth=6;ctx.beginPath();ctx.arc(cx,cy,31+Math.sin(game.tick*.2)*5,0,Math.PI*2);ctx.stroke()}overlay("SYSTEM DOWN",`原因: ${game.deathReason}   残機 ${Math.max(0,game.lives)}   ENTER リトライ`,PALETTE.red)}
+function drawGameOver(){drawBackdrop();strokeText(game.arcade?"CIRCUIT OVER":"GAME OVER",576,234,64,PALETTE.red,"#08030a","center");text(`SCORE ${String(game.score).padStart(8,"0")}`,576,331,26,PALETTE.gold,"center");text(game.arcade?`BEST ${String(save.circuitHigh).padStart(8,"0")}`:"ENTER そのステージからCONTINUE（得点半減）",576,420,18,game.arcade?PALETTE.cyan:PALETTE.ink,"center");text(game.arcade?"ENTER / ESC TITLE":"ESC TITLE",576,462,15,PALETTE.muted,"center")}
+function drawClear(){
+  drawPlay();rect(0,0,W,H,"rgba(2,6,11,.86)");const c=game.clearData,s=stageDef(),wc=WORLDS[s.world];text("MISSION COMPLETE",576,104,20,wc.color,"center");strokeText(`RANK ${c.rank}`,576,181,72,c.rank==="S"?PALETTE.gold:PALETTE.white,"#02050a","center");
+  const rows=[["TIME",`${c.sec.toFixed(1)} / ${s.par}.0`,c.medals&1],["NO DAMAGE",game.stats.damage?`${game.stats.damage} HIT`:"PERFECT",c.medals&2],["EFFICIENCY",`${game.stats.rotations} / ${s.parRot} ORBIT`,c.medals&4],["TECH",s.tech,c.tech]];rows.forEach((r,i)=>{const y=288+i*61;rect(230,y-22,692,46,i%2?"#0b1928":"#0e2030");text(r[0],252,y,15,PALETTE.muted);text(r[1],433,y,15,r[2]?PALETTE.white:PALETTE.muted);text(r[2]?"●":"○",892,y,20,r[2]?PALETTE.gold:"#334657","center")});text(`BONUS +${c.bonus}`,576,558,22,PALETTE.gold,"center");if(game.unlockedNotice)text(game.unlockedNotice,576,605,16,PALETTE.green,"center");text(game.arcade?"ENTER 次区画   ESC CIRCUIT終了":"ENTER 次へ   R 再挑戦   ESC MATRIX",576,666,15,PALETTE.ink,"center")
+}
+function drawEnding(){drawBackdrop();for(let i=0;i<8;i++){const a=game.tick*.005+i*Math.PI/4,r=110+Math.sin(game.tick*.02+i)*25;const x=576+Math.cos(a)*r,y=252+Math.sin(a)*r;ctx.beginPath();ctx.arc(x,y,8,0,Math.PI*2);ctx.fillStyle=i%2?PALETTE.gold:PALETTE.cyan;ctx.fill()}
+  if(BETA&&!game.arcade){
+    strokeText("BETA CLEAR",576,102,42,PALETTE.white,"#05070d","center");
+    text("1-1〜2-8、全16作戦 COMPLETE。",576,408,21,PALETTE.ink,"center");
+    text("ベータ版はここまで。3-1以降の区画は現在制作中です。",576,452,19,PALETTE.gold,"center");
+    text("面白かった点・詰まった点をレビューで教えてください。",576,494,17,PALETTE.cyan,"center");
+    text("その一言が続きの制作を早めます。",576,528,15,PALETTE.muted,"center");
+    text(`HIGH SCORE ${String(save.highScore).padStart(8,"0")}`,576,578,18,PALETTE.gold,"center");
+    text("ENTER TITLE",576,656,17,PALETTE.white,"center");return}
+  strokeText(game.arcade?"CIRCUIT MASTER":"ZERO AXIS SILENCED",576,102,42,PALETTE.white,"#05070d","center");text(game.arcade?"8区画を一つの判断鎖として走破した。":"危険を消すのではなく、行き先を選ぶ技術が軌道を救った。",576,426,21,PALETTE.ink,"center");text(game.arcade?"1 CREDIT COMPLETE":"全40作戦 COMPLETE",576,484,18,PALETTE.gold,"center");text(`${game.arcade?"CIRCUIT":"HIGH"} SCORE ${String(game.arcade?save.circuitHigh:save.highScore).padStart(8,"0")}`,576,527,18,PALETTE.cyan,"center");text(game.arcade?"ノーダメージ区画の1UPが最短走破の鍵です。":"未取得TECHと分岐作戦がMATRIXに残っています。",576,577,15,PALETTE.muted,"center");text("ENTER TITLE",576,656,17,PALETTE.white,"center")}
+
+function draw(){
+  switch(game.mode){case"title":drawTitle();break;case"select":drawSelect();break;case"help":drawHelp();break;case"brief":drawBrief();break;case"play":drawPlay();break;case"pause":drawPause();break;case"death":drawDeath();break;case"gameover":drawGameOver();break;case"clear":drawClear();break;case"ending":drawEnding();break}
+}
+
+function runSelfTests(){
+  const fail=[],ok=(c,m)=>{if(!c)fail.push(m)};
+  ok(STAGES.length===STAGE_TOTAL,"stage count");ok(STAGES.every((s,i)=>s.id===i+1),"stage ids");ok(STAGES.every(s=>s.intent&&s.tech&&s.name),"stage metadata");
+  for(const p of [[-1,-1],[0,-1],[1,-1],[1,0],[1,1],[0,1],[-1,1],[-1,0]]){let q=p;for(let i=0;i<4;i++)q=cwPos(...q);ok(q[0]===p[0]&&q[1]===p[1],`cw4 ${p}`);const a=cwPos(...p),b=ccwPos(...a);ok(b[0]===p[0]&&b[1]===p[1],`inverse ${p}`)}
+  const sig=new Set();for(const s of STAGES){
+    const all=[s.p,s.exit,...s.walls,...s.pits,...s.sparks,...s.fragile,...s.nodes,...s.gates,...s.objects.map(o=>[o.x,o.y]),...s.enemies.map(e=>[e.x,e.y])];ok(all.every(p=>Number.isInteger(p[0])&&Number.isInteger(p[1])&&p[0]>=0&&p[0]<COLS&&p[1]>=0&&p[1]<ROWS),`bounds ${s.id}`);ok(s.p[0]>0&&s.p[0]<14&&s.p[1]>0&&s.p[1]<10,`player ${s.id}`);const fixed=new Set(s.walls.map(p=>keyOf(...p)));ok(!fixed.has(keyOf(...s.p)),`player wall ${s.id}`);ok(!fixed.has(keyOf(...s.exit)),`exit wall ${s.id}`);const q=JSON.stringify([s.p,s.exit,s.walls,s.pits,s.objects.map(o=>[o.type,o.x,o.y]),s.enemies.map(e=>[e.type,e.x,e.y])]);ok(!sig.has(q),`duplicate ${s.id}`);sig.add(q)
+    const holes=new Set(s.pits.map(p=>keyOf(...p))),liveSpark=new Set(s.sparks.map(p=>keyOf(...p))),dynamic=[["player",...s.p],...s.objects.map(o=>[o.type,o.x,o.y]),...s.enemies.map(e=>[e.type,e.x,e.y])],occ=new Map();ok(!holes.has(keyOf(...s.exit)),`exit pit ${s.id}`);for(const [type,x,y]of dynamic){const k=keyOf(x,y);ok(!fixed.has(k),`${type} wall ${s.id}`);ok(!holes.has(k),`${type} pit ${s.id}`);if(type!=="player")ok(!liveSpark.has(k),`${type} spark ${s.id}`);ok(!occ.has(k),`${type}/${occ.get(k)} overlap ${s.id}`);occ.set(k,type)}
+    const closed=new Set([...fixed,...s.gates.map(p=>keyOf(...p))]),reach=new Set([keyOf(...s.p)]),queue=[[...s.p]];while(queue.length){const [x,y]=queue.shift();for(const [dx,dy]of DIRS){const nx=x+dx,ny=y+dy,k=keyOf(nx,ny);if(nx<=0||ny<=0||nx>=14||ny>=10||reach.has(k)||closed.has(k)||holes.has(k))continue;reach.add(k);queue.push([nx,ny])}}let legal=0;for(const k of reach){const [x,y]=k.split(",").map(Number);let clear=true;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++)if((dx||dy)&&(x+dx<=0||y+dy<=0||x+dx>=14||y+dy>=10||closed.has(keyOf(x+dx,y+dy))))clear=false;if(clear)legal++}ok(legal>0,`no legal orbit center ${s.id}`)
+  }
+  const bad=cleanSave({maxStage:999,unlocked:[-1,1,1,99,"x"],settings:{volume:9},records:{1:{score:-4,time:"x",rank:"Z"}}});ok(bad.maxStage===STAGE_TOTAL&&bad.settings.volume===1&&bad.unlocked.length===1,"save clamp");
+  game.debugFailures=fail;return {passed:fail.length===0,failed:fail.length,details:fail};
+}
+window.runSelfTests=runSelfTests;
+window.ORBITAL_REPRISAL={version:BETA?"1.0.0-beta16":"1.0.0",stages:STAGES,runSelfTests,loadStage:(n)=>loadStage(n)};
+
+const startupTests=runSelfTests();document.body.dataset.selfTest=startupTests.passed?"passed":`failed:${startupTests.details.join("|")}`;document.body.classList.add("ready");
+let last=performance.now(),acc=0;function loop(now){acc+=Math.min(.1,(now-last)/1000);last=now;let steps=0;while(acc>=1/60&&steps++<5){fixedTick();acc-=1/60}draw();requestAnimationFrame(loop)}requestAnimationFrame(loop);canvas.focus();
+</script>
+</body>
+</html>
