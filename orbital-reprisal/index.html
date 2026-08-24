@@ -2,7 +2,11 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#05070d">
 <title>環撃軌道 ORBITAL REPRISAL β（1-1〜2-8）</title>
 <style>
   :root{color-scheme:dark;background:#05070d}
@@ -15,6 +19,90 @@
   #sr{position:fixed;left:-9999px;width:1px;height:1px;overflow:hidden}
   #boot{position:absolute;inset:0;display:grid;place-items:center;color:#87efff;letter-spacing:.25em;font-size:clamp(12px,2vw,20px);pointer-events:none}
   .ready #boot{display:none}
+
+  /* ================= TOUCH / MOBILE UI =================
+     盤面は「高さいっぱい」が最大サイズ。左右に必ずできる余白へ操作系を置く。 */
+  #pad{display:none}
+  body.touch{-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none;touch-action:none}
+  body.touch canvas{touch-action:none}
+  body.touch #pad{display:block;position:relative;z-index:10}
+  .btn{-webkit-appearance:none;appearance:none;margin:0;padding:0;font-family:inherit;font-weight:700;font-size:13px;letter-spacing:.06em;
+    color:#cdeeff;background:linear-gradient(#123049,#09182a);border:1px solid #2e5a79;border-radius:14px;
+    display:grid;place-items:center;line-height:1.2;text-align:center;touch-action:none;user-select:none;cursor:pointer}
+  .btn small{display:block;font-size:10px;font-weight:600;opacity:.62;letter-spacing:0}
+  .btn.on,.btn:active{background:linear-gradient(#1c6285,#0d3d55);border-color:#40efff;color:#fff;box-shadow:0 0 14px rgba(64,239,255,.35)}
+  .btn.hot{border-color:#4c7f9e}
+  .btn.hot.on{border-color:#ffd457;background:linear-gradient(#7a5a12,#3d2c07);box-shadow:0 0 14px rgba(255,212,87,.35)}
+  /* 十字キー：4キーとも同寸。中央行だけ広げて▲▼の間隔を稼ぐ */
+  .stick{display:grid;width:var(--sw);grid-template-columns:1fr 1fr;
+    grid-template-rows:var(--rh) calc(var(--rh)*1.34) var(--rh);gap:var(--gap);--bw:calc((var(--sw) - var(--gap))/2)}
+  .stick .btn{font-size:23px;width:var(--bw);height:var(--rh);justify-self:center;align-self:center}
+  .stick .u{grid-area:1/1/2/3}.stick .l{grid-area:2/1/3/2}.stick .r{grid-area:2/2/3/3}.stick .d{grid-area:3/1/4/3}
+  .acts{display:flex;flex-direction:column;align-items:center;gap:14px}
+  .acts .btn{width:var(--a);height:var(--a);border-radius:50%;font-size:16px}
+  .sys{display:flex;gap:6px;justify-content:center}
+  .sys .btn{min-width:54px;height:34px;padding:0 9px;font-size:11px;border-radius:10px}
+  /* 押しても何も起きないキーはその画面では出さない */
+  .sys [data-k="r"],.sys [data-k="q"],.sys [data-k="h"],.sys [data-k="m"]{display:none}
+  #pad[data-mode="play"] .sys [data-k="r"],#pad[data-mode="pause"] .sys [data-k="r"],
+  #pad[data-mode="clear"] .sys [data-k="r"],#pad[data-mode="death"] .sys [data-k="r"],
+  #pad[data-mode="pause"] .sys [data-k="q"],
+  #pad[data-mode="title"] .sys [data-k="h"],#pad[data-mode="select"] .sys [data-k="h"],
+  #pad[data-mode="title"] .sys [data-k="m"]{display:grid}
+  #pad[data-mode="play"] .sys [data-k="enter"],#pad[data-mode="title"] .sys [data-k="escape"]{display:none}
+
+  #rotate{display:none}
+  #rotate .ico{width:72px;height:116px;border:3px solid #40efff;border-radius:15px;position:relative;
+    box-shadow:0 0 26px rgba(64,239,255,.28);animation:tilt 2.6s ease-in-out infinite}
+  #rotate .ico::after{content:"";position:absolute;left:50%;bottom:8px;transform:translateX(-50%);width:26px;height:3px;background:#40efff;border-radius:2px}
+  #rotate b{font-size:19px;letter-spacing:.1em;color:#ddf8ff}
+  #rotate span{font-size:13px;color:#6f93a8;line-height:1.8}
+  #rotate .btn{min-width:190px;height:44px;font-size:12px;border-radius:12px;margin-top:6px}
+  @keyframes tilt{0%,38%{transform:rotate(0)}58%,100%{transform:rotate(-90deg)}}
+
+  /* --- 横向き：盤面を画面の高さいっぱいまで拡大し、余った左右に操作系 --- */
+  @media (orientation:landscape){
+    body.touch{
+      --gap:9px;
+      --insL:env(safe-area-inset-left,0px);
+      --insR:env(safe-area-inset-right,0px);
+      --fw:min(calc(100vw - var(--insL) - var(--insR) - 6px),calc((100vh - 2px)*1.6));    /* 旧iOS用 */
+      --fw:min(calc(100vw - var(--insL) - var(--insR) - 6px),calc((100dvh - 2px)*1.6));   /* 高さ基準で最大化 */
+      --gut:calc((100vw - var(--fw))/2);          /* 盤面の左右に空く帯 */
+      --gutL:calc(var(--gut) - var(--insL));      /* ノッチを除いた実効幅 */
+      --gutR:calc(var(--gut) - var(--insR));
+      --a:clamp(54px,calc(var(--gutR) - 8px),98px);
+      --slack:max(0px,calc(var(--gutR) - var(--a) - 8px));                 /* 右へ寄せられる量 */
+      --shift:min(var(--slack),max(0px,calc(180px - var(--gutL))));       /* 十字キー分だけ右へ */
+      --sw:clamp(88px,calc(var(--gutL) + var(--shift) - 8px),172px);
+      --rh:min(calc((var(--sw) - var(--gap))/2),calc((100vh - 74px)/3.34));
+      --rh:min(calc((var(--sw) - var(--gap))/2),calc((100dvh - 74px)/3.34));
+    }
+    body.touch #frame{width:var(--fw);height:calc(var(--fw)/1.6);max-height:none;filter:none;
+      transform:translateX(var(--shift))}                                  /* 盤面を回転ボタン側へ */
+    body.touch #pad{position:fixed;inset:0;pointer-events:none}
+    body.touch #pad>*{position:absolute;pointer-events:auto}
+    body.touch .stick{left:max(4px,env(safe-area-inset-left));bottom:max(6px,env(safe-area-inset-bottom))}
+    body.touch .acts{right:max(4px,env(safe-area-inset-right));bottom:max(6px,env(safe-area-inset-bottom))}
+    body.touch .sys{left:50%;transform:translateX(-50%);bottom:max(1px,env(safe-area-inset-bottom));opacity:.92}
+    body.touch .sys .btn{height:30px;min-width:48px;font-size:10px}
+  }
+
+  /* --- 縦向き：横画面を案内（回転ロック対策に「縦のまま遊ぶ」も用意） --- */
+  @media (orientation:portrait){
+    body.touch #frame,body.touch #pad{display:none}
+    body.touch #rotate{position:fixed;inset:0;z-index:50;display:grid;align-content:center;justify-items:center;
+      gap:16px;text-align:center;padding:0 26px;background:#05070d}
+    body.touch.portrait-ok #rotate{display:none}
+    body.touch.portrait-ok{display:block;place-items:start;height:auto}
+    body.touch.portrait-ok #frame{display:block;position:relative;width:100vw;height:62.5vw;max-height:none;margin:0;filter:none}
+    body.touch.portrait-ok #pad{display:flex;position:relative;z-index:10;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;
+      gap:12px;padding:14px 12px calc(16px + env(safe-area-inset-bottom));
+      --gap:12px;--sw:clamp(158px,46vw,248px);--rh:clamp(52px,15vw,82px);--a:clamp(78px,23vw,124px)}
+    body.touch.portrait-ok #pad>*{position:static;transform:none}
+    body.touch.portrait-ok .sys{width:100%;justify-content:center}
+    body.touch.portrait-ok .acts{flex-direction:column}
+  }
 </style>
 </head>
 <body>
@@ -22,6 +110,32 @@
   <canvas id="game" width="1152" height="720" tabindex="0" aria-label="環撃軌道 ORBITAL REPRISAL。矢印またはWASDで移動、Zで時計回り、Xで反時計回りに周囲を公転させます。"></canvas>
   <div id="boot">SYSTEM CHECK...</div>
 </main>
+<div id="rotate" hidden>
+  <div class="ico"></div>
+  <b>横画面推奨です</b>
+  <span>端末を横向きにすると盤面が大きく表示されます。<br>回転しない場合は画面回転ロックをご確認ください。</span>
+  <button class="btn" id="portraitGo">このまま縦画面で遊ぶ</button>
+</div>
+<div id="pad" hidden aria-label="タッチ操作パネル">
+  <div class="sys">
+    <button class="btn" data-k="enter" aria-label="決定・START">ENTER</button>
+    <button class="btn" data-k="escape" aria-label="戻る・ポーズ">ESC</button>
+    <button class="btn" data-k="r" aria-label="リトライ">R<small>長押</small></button>
+    <button class="btn" data-k="q" aria-label="ステージ選択へ戻る">Q<small>MATRIX</small></button>
+    <button class="btn" data-k="h" aria-label="操作説明">H</button>
+    <button class="btn" data-k="m" aria-label="音楽">♪</button>
+  </div>
+  <div class="stick">
+    <button class="btn u" data-k="up" aria-label="上">▲</button>
+    <button class="btn l" data-k="left" aria-label="左">◀</button>
+    <button class="btn r" data-k="right" aria-label="右">▶</button>
+    <button class="btn d" data-k="down" aria-label="下">▼</button>
+  </div>
+  <div class="acts">
+    <button class="btn hot" data-k="x" aria-label="反時計回り・戻る">↺ CCW<small>X / 戻る</small></button>
+    <button class="btn" data-k="z" aria-label="時計回り・決定">↻ CW<small>Z / 決定</small></button>
+  </div>
+</div>
 <div id="sr" aria-live="polite"></div>
 <script>
 "use strict";
@@ -193,6 +307,34 @@ addEventListener("keyup",e=>{const k=normKey(e.key);input.keyDown.delete(k);sync
 addEventListener("blur",()=>{input.keyDown.clear();input.gpDown.clear();syncDown();input.pressed.clear();if(game.mode==="play")game.mode="pause"});
 document.addEventListener("visibilitychange",()=>{if(document.hidden&&game.mode==="play")game.mode="pause"});
 canvas.addEventListener("pointerdown",()=>{canvas.focus();audio.init()});
+
+/* ---- TOUCH UI: iPhone / Android 向け仮想パッド ---------------------------
+   物理キーと同じ input セットへ流し込むだけなので、ゲーム側の処理は不変。 */
+let padRef=null;
+const TOUCH_UI=(typeof matchMedia==="function"&&matchMedia("(pointer:coarse)").matches)||(navigator.maxTouchPoints||0)>0||("ontouchstart"in window);
+function vpress(k){audio.init();if(audio.ac?.state==="suspended")audio.ac.resume();if(!input.keyDown.has(k))input.pressed.add(k);input.keyDown.add(k);syncDown()}
+function vrelease(k){input.keyDown.delete(k);syncDown();input.released.add(k)}
+if(TOUCH_UI){
+  padRef=document.getElementById("pad");const pad=padRef,rotateGate=document.getElementById("rotate");
+  document.body.classList.add("touch");pad.hidden=false;rotateGate.hidden=false;
+  document.getElementById("portraitGo").addEventListener("click",()=>{document.body.classList.add("portrait-ok");canvas.focus()});
+  const mqPortrait=(typeof matchMedia==="function")?matchMedia("(orientation:portrait)"):null;
+  const onOrient=()=>{if(mqPortrait&&mqPortrait.matches&&!document.body.classList.contains("portrait-ok")&&game.mode==="play")game.mode="pause"};
+  if(mqPortrait&&mqPortrait.addEventListener)mqPortrait.addEventListener("change",onOrient);
+  addEventListener("orientationchange",onOrient);
+  const tryLockLandscape=()=>{try{screen.orientation?.lock?.("landscape")?.catch(()=>{})}catch(_){}};
+  addEventListener("pointerdown",tryLockLandscape,{once:true});
+  for(const b of pad.querySelectorAll("[data-k]")){
+    const k=b.dataset.k;
+    const off=()=>{if(!b.classList.contains("on"))return;b.classList.remove("on");vrelease(k)};
+    b.addEventListener("pointerdown",e=>{e.preventDefault();try{b.setPointerCapture(e.pointerId)}catch(_){}b.classList.add("on");vpress(k)},{passive:false});
+    b.addEventListener("pointerup",off);b.addEventListener("pointercancel",off);b.addEventListener("lostpointercapture",off);
+    b.addEventListener("contextmenu",e=>e.preventDefault());
+    b.addEventListener("touchstart",e=>e.preventDefault(),{passive:false});
+  }
+  document.addEventListener("gesturestart",e=>e.preventDefault());
+  document.addEventListener("dblclick",e=>e.preventDefault(),{passive:false});
+}
 
 function pollGamepad(){
   if(!save.settings.gamepad||!navigator.getGamepads)return;const g=[...navigator.getGamepads()].find(Boolean);if(!g){input.gpPrev=[];input.gpDown.clear();input.axisX=0;input.axisY=0;syncDown();return}
@@ -650,7 +792,7 @@ function drawEnding(){drawBackdrop();for(let i=0;i<8;i++){const a=game.tick*.005
     text("ENTER TITLE",576,656,17,PALETTE.white,"center");return}
   strokeText(game.arcade?"CIRCUIT MASTER":"ZERO AXIS SILENCED",576,102,42,PALETTE.white,"#05070d","center");text(game.arcade?"8区画を一つの判断鎖として走破した。":"危険を消すのではなく、行き先を選ぶ技術が軌道を救った。",576,426,21,PALETTE.ink,"center");text(game.arcade?"1 CREDIT COMPLETE":"全40作戦 COMPLETE",576,484,18,PALETTE.gold,"center");text(`${game.arcade?"CIRCUIT":"HIGH"} SCORE ${String(game.arcade?save.circuitHigh:save.highScore).padStart(8,"0")}`,576,527,18,PALETTE.cyan,"center");text(game.arcade?"ノーダメージ区画の1UPが最短走破の鍵です。":"未取得TECHと分岐作戦がMATRIXに残っています。",576,577,15,PALETTE.muted,"center");text("ENTER TITLE",576,656,17,PALETTE.white,"center")}
 
-function draw(){
+function draw(){if(padRef&&padRef.dataset.mode!==game.mode)padRef.dataset.mode=game.mode;
   switch(game.mode){case"title":drawTitle();break;case"select":drawSelect();break;case"help":drawHelp();break;case"brief":drawBrief();break;case"play":drawPlay();break;case"pause":drawPause();break;case"death":drawDeath();break;case"gameover":drawGameOver();break;case"clear":drawClear();break;case"ending":drawEnding();break}
 }
 
