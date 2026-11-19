@@ -13,10 +13,12 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#0b1618">
 <!--
-  照明台数 概算ツール β  v0.1.0
+  照明台数 概算ツール β  v0.2.0
   TOTE AI TOOLS / https://tote-tools.com/lighting-count/
   光束法による概算のみ。逐点法・配光計算・照度分布は扱わない。
   単一ファイル完結・外部依存なし・入力はブラウザ内でのみ処理。
+  v0.2.0: 採用台数・作業面高さ・室指数（参考）・用途別推奨照度・新品時保守率の追加、
+          器具光束の注記、1列配置の壁距離表示、印刷の改ページ修正。
 -->
 <style>
 :root{
@@ -121,6 +123,10 @@ input[type=text]::placeholder{color:#4d6b6d;}
 .err{display:none;margin-top:7px;font-size:13px;color:var(--danger);}
 .field.bad .err{display:block;}
 .help{margin-top:8px;font-size:12.5px;line-height:1.65;color:var(--muted);}
+.caution{
+  margin-top:9px;font-size:13px;line-height:1.6;color:#f0cf8e;
+  background:var(--warn-bg);border:1px solid #5a4413;border-radius:8px;padding:8px 11px;
+}
 .presets{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap;}
 .preset{
   flex:1 1 auto;min-width:92px;min-height:44px;
@@ -133,6 +139,10 @@ input[type=text]::placeholder{color:#4d6b6d;}
 .preset:hover{border-color:var(--teal-2);color:var(--text);}
 .preset[aria-pressed=true]{background:var(--teal-deep);border-color:var(--teal-2);color:var(--teal);}
 .preset[aria-pressed=true] span{color:var(--teal);}
+.recs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px;}
+.recs .preset{flex-direction:row;justify-content:space-between;align-items:center;min-width:0;font-size:12.5px;padding:7px 10px;}
+.recs .preset span{font-size:14px;}
+.recs-src{margin-top:10px;font-size:12px;line-height:1.65;color:var(--muted);}
 
 /* ---------- buttons ---------- */
 .btnrow{display:flex;gap:10px;flex-wrap:wrap;}
@@ -142,6 +152,7 @@ input[type=text]::placeholder{color:#4d6b6d;}
   color:var(--text);font-family:var(--sans);font-size:14.5px;font-weight:600;
   padding:11px 16px;cursor:pointer;
 }
+.btn.small{flex:0 0 auto;min-height:40px;padding:8px 14px;font-size:13.5px;}
 .btn:hover{border-color:var(--teal-2);}
 .btn.primary{background:var(--teal-2);border-color:var(--teal-2);color:#04231f;}
 .btn.primary:hover{background:var(--teal);}
@@ -163,6 +174,9 @@ input[type=text]::placeholder{color:#4d6b6d;}
 }
 .hero .num .u{font-size:.34em;text-decoration:none;color:var(--text-2);margin-left:8px;letter-spacing:0;}
 .hero .sub{font-size:12.5px;color:var(--muted);}
+.hero-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.hero-row .num{font-size:clamp(40px,11vw,60px);}
+.hero-row .hcell+.hcell{border-left:1px dashed var(--line-2);}
 
 /* 計算の流れ（signature） */
 .ladder{list-style:none;padding:16px;}
@@ -203,6 +217,7 @@ input[type=text]::placeholder{color:#4d6b6d;}
   background:var(--bg-soft);border:1px solid var(--line);color:var(--text-2);
 }
 .note.warn{background:var(--warn-bg);border-color:#5a4413;color:#f0cf8e;}
+.note.stop{background:var(--danger-bg);border-color:#5a2226;color:#ffb3b3;}
 
 textarea{
   width:100%;background:var(--bg-soft);color:var(--text-2);
@@ -250,26 +265,31 @@ footer a{text-decoration:none;}
   .p-head{border-bottom:2px solid #000;padding-bottom:5px;margin-bottom:10px;
           display:flex;justify-content:space-between;align-items:flex-end;gap:10px;}
   .p-head .meta{font-size:9pt;text-align:right;line-height:1.5;}
-  #printSheet h2{font-size:10.5pt;border-left:4px solid #000;padding-left:7px;margin:14px 0 6px;}
-  table.p-tab{border-collapse:collapse;width:100%;font-size:9.5pt;}
+  #printSheet h2,#printSheet h3{font-size:10.5pt;border-left:4px solid #000;padding-left:7px;margin:12px 0 6px;
+          break-after:avoid;page-break-after:avoid;}
+  /* 見出しと本体を同じページに置く：見出し＋本体を1つのブロックとして扱う */
+  .p-sec{break-inside:avoid;page-break-inside:avoid;}
+  table.p-tab{border-collapse:collapse;width:100%;font-size:9.5pt;break-inside:avoid;}
   table.p-tab th,table.p-tab td{border:1px solid #666;padding:3px 7px;}
   table.p-tab th{background:#eee;text-align:left;width:38%;font-weight:600;}
   table.p-tab td{text-align:right;font-family:var(--mono);}
   .p-hero{border:2px solid #000;padding:8px 12px;display:flex;justify-content:space-between;
-          align-items:baseline;margin-bottom:10px;}
-  .p-hero b{font-size:20pt;font-family:var(--mono);}
+          align-items:baseline;gap:10px;margin-bottom:10px;break-inside:avoid;}
+  .p-hero b{font-size:17pt;font-family:var(--mono);}
+  .p-hero .lbl{font-size:9.5pt;}
   .p-formula{border:1px solid #666;background:#f4f4f4;padding:7px 10px;
-             font-family:var(--mono);font-size:9pt;line-height:1.85;white-space:pre;}
-  .p-disc{border:1px solid #000;padding:8px 11px;font-size:9pt;line-height:1.6;margin-top:12px;}
+             font-family:var(--mono);font-size:9pt;line-height:1.85;white-space:pre;break-inside:avoid;}
+  .p-disc{border:1px solid #000;padding:8px 11px;font-size:9pt;line-height:1.6;margin-top:12px;break-inside:avoid;}
   .p-disc b{display:block;margin-bottom:3px;}
   .p-foot{margin-top:10px;font-size:8.5pt;color:#333;}
-  #printSheet svg{width:74mm;height:auto;border:1px solid #666;}
-  .p-plan{display:flex;gap:10px;align-items:flex-start;}
+  #printSheet svg{width:64mm;height:auto;border:1px solid #666;}
+  .p-plan{display:flex;gap:10px;align-items:flex-start;break-inside:avoid;}
   .p-plan .p-plan-t{flex:1;font-size:9.5pt;}
 }
 @media(max-width:520px){
   .formula{font-size:11.5px;line-height:1.9;}
   .ladder .v{font-size:16px;}
+  .recs{grid-template-columns:1fr;}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important;}}
 </style>
@@ -323,6 +343,18 @@ footer a{text-decoration:none;}
           </div>
           <p class="err" id="e-e"></p>
           <p class="help">作業面で確保したい平均照度を入れてください。</p>
+          <div class="recs" role="group" aria-label="用途別の推奨照度（ボタンで必要照度に入ります）">
+            <button type="button" class="preset" data-t="e" data-v="750">事務室・設計室・製図室<span>750</span></button>
+            <button type="button" class="preset" data-t="e" data-v="500">会議室・応接室<span>500</span></button>
+            <button type="button" class="preset" data-t="e" data-v="300">受付<span>300</span></button>
+            <button type="button" class="preset" data-t="e" data-v="200">更衣室・便所・洗面所<span>200</span></button>
+            <button type="button" class="preset" data-t="e" data-v="150">階段<span>150</span></button>
+            <button type="button" class="preset" data-t="e" data-v="100">廊下<span>100</span></button>
+          </div>
+          <p class="recs-src">
+            上のボタンは必要照度欄に値を入れるだけです。値の出典：JIS Z 9110 の推奨照度を参考にした候補値（最新版 2024 年版との照合は未実施です）。<br>
+            参考（法令の最低値）：事務所衛生基準規則では、一般的な事務作業の照度は 300 lx 以上とされています。
+          </p>
         </div>
 
         <div class="field" id="f-f">
@@ -332,6 +364,7 @@ footer a{text-decoration:none;}
             <span class="unit">lm</span>
           </div>
           <p class="err" id="e-f"></p>
+          <p class="caution"><b>カタログの器具光束（lm）を入れてください。保守率・利用率を掛ける前の値です。</b></p>
           <p class="help">使う予定の器具のカタログ値を入れてください。器具データは内蔵していません。</p>
         </div>
 
@@ -353,8 +386,9 @@ footer a{text-decoration:none;}
             <button type="button" class="preset" data-t="m" data-v="0.85">良好<span>0.85</span></button>
             <button type="button" class="preset" data-t="m" data-v="0.8">標準<span>0.80</span></button>
             <button type="button" class="preset" data-t="m" data-v="0.65">厳しめ<span>0.65</span></button>
+            <button type="button" class="preset" data-t="m" data-v="1">新品時・短期使用<span>1.00</span></button>
           </div>
-          <p class="help">保守率は、経年劣化や汚れによる光束低下を見込む係数です。<br>環境や器具状態により変わります。<br>分からない場合は標準 0.8 を目安にしてください。</p>
+          <p class="help">保守率は、経年劣化や汚れによる光束低下を見込む係数です。<br>環境や器具状態により変わります。<br>分からない場合は標準 0.8 を目安にしてください。<br>「新品時・短期使用 1.00」は、仮設事務所など使用期間が短い場合の目安です。初期照度になります。</p>
         </div>
 
         <div class="field" id="f-u">
@@ -376,7 +410,7 @@ footer a{text-decoration:none;}
     </div>
 
     <div class="card">
-      <h2>任意</h2>
+      <h2>高さ（判定用・任意）</h2>
       <div class="body">
         <div class="field" id="f-h">
           <label for="i-h">取付高さ<span class="opt">任意</span></label>
@@ -385,7 +419,35 @@ footer a{text-decoration:none;}
             <span class="unit">m</span>
           </div>
           <p class="err" id="e-h"></p>
-          <p class="help">配置ピッチが広すぎないかのコメントにだけ使います。台数の計算には影響しません。</p>
+          <p class="help">取付高さは、器具の間隔の判定（作業面高さを引いた高さで判定）と室指数の参考表示に使います。台数の計算には影響しません。</p>
+        </div>
+        <div class="field" id="f-wp" style="margin-top:18px">
+          <label for="i-wp">作業面高さ</label>
+          <div class="inputline">
+            <input type="text" id="i-wp" inputmode="decimal" autocomplete="off" aria-describedby="e-wp" value="0.85">
+            <span class="unit">m</span>
+          </div>
+          <p class="err" id="e-wp"></p>
+          <p class="help">既定は 0.85 m（一般的な床上の作業面）です。机上作業なら 0.7〜0.85 m が目安です。作業面の高さは計算書に記録されます。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>台数の指定（任意）</h2>
+      <div class="body">
+        <div class="field" id="f-n">
+          <label for="i-n">採用台数<span class="opt">任意</span></label>
+          <div class="inputline">
+            <input type="text" id="i-n" inputmode="numeric" autocomplete="off" aria-describedby="e-n" placeholder="空欄＝計算台数">
+            <span class="unit">台</span>
+          </div>
+          <p class="err" id="e-n"></p>
+          <p class="help">空欄なら計算台数をそのまま使います。配置を偶数台にそろえたいときなどに入れてください。実効照度と配置案は採用台数で計算します。</p>
+          <div class="btnrow" style="margin-top:10px">
+            <button type="button" class="btn small" id="btn-even" disabled>偶数に切り上げ</button>
+          </div>
+          <p class="help">ボタンを押すと採用台数欄に値が入るだけです。自動では入りません。</p>
         </div>
         <div class="btnrow" style="margin-top:18px">
           <button type="button" class="btn" id="btn-reset">入力をリセット</button>
@@ -427,17 +489,20 @@ footer a{text-decoration:none;}
 <div class="formula">面積      A     = 幅 W × 奥行 L
 必要光束  F_req = A × 必要照度 E
 有効光束  F_eff = 器具光束 F × 保守率 M × 利用率 U
-必要台数  N     = F_req ÷ F_eff（切り上げ）
-実効照度        = N × F_eff ÷ A</div>
-    <p style="font-size:12.5px;color:var(--muted)">単位：A は m²、F_req と F_eff は lm、N は台、実効照度は lx。</p>
+計算台数  N     = F_req ÷ F_eff（切り上げ）
+採用台数  N'    = 入力があればその値、なければ N
+実効照度        = N' × F_eff ÷ A</div>
+    <p style="font-size:12.5px;color:var(--muted)">単位：A は m²、F_req と F_eff は lm、N・N' は台、実効照度は lx。</p>
+    <h3>判定に使う高さ（v0.2.0）</h3>
+    <p>器具の間隔と高さの比は、<b>取付高さ − 作業面高さ</b> で判定します。作業面高さの既定は 0.85 m です。判定の目安（0.8〜1.5）は本ツールの目安値で、器具メーカーの推奨値があればそちらを優先してください。</p>
     <h3>前提条件</h3>
     <ul>
       <li>水平面の平均照度だけを扱います。照度のムラ（最小照度・均斉度）は計算しません。</li>
       <li>器具の配光（ビーム角）は考慮しません。</li>
       <li>壁・天井・床の反射は、利用率 U にまとめて含まれるものとして扱います。</li>
-      <li>利用率 U と保守率 M は、入力された値をそのまま使います。室指数や反射率からの自動計算は行いません。</li>
+      <li>利用率 U と保守率 M は、入力された値をそのまま使います。室指数や反射率からの自動計算は行いません。室指数 K は参考表示のみです。</li>
       <li>配置案は縦横を等分割した格子です。開口・障害物・什器・機器配置は考慮していません。</li>
-      <li>台数は切り上げるため、実効平均照度は必要照度をやや上回ります。</li>
+      <li>台数は切り上げるため、実効平均照度は必要照度をやや上回ります。採用台数を計算台数より少なくした場合は、警告を表示します。</li>
       <li>非常用照明・誘導灯、グレア、色温度、演色性、調光制御、配線・回路・電源容量は扱いません。</li>
     </ul>
   </div>
@@ -464,7 +529,7 @@ footer a{text-decoration:none;}
 </main>
 
 <footer>
-  照明台数 概算ツール β v0.1.0 ／ <a href="/">TOTE AI TOOLS</a>
+  照明台数 概算ツール β v0.2.0 ／ <a href="/">TOTE AI TOOLS</a>
 </footer>
 
 <!-- ===================== 印刷用 ===================== -->
@@ -473,18 +538,29 @@ footer a{text-decoration:none;}
     <h1>照明台数 概算計算書（概算検討用）</h1>
     <div class="meta" id="p-meta"></div>
   </div>
-  <div class="p-hero"><span>概算必要台数</span><b id="p-n"></b></div>
-  <h2>入力条件</h2>
-  <table class="p-tab" id="p-in"></table>
-  <h2>計算結果</h2>
-  <table class="p-tab" id="p-out"></table>
-  <h2>簡易配置案</h2>
-  <div class="p-plan">
-    <div id="p-svg"></div>
-    <div class="p-plan-t" id="p-plantext"></div>
+  <div class="p-hero">
+    <span class="lbl">計算台数（切り上げ後）</span><b id="p-n"></b>
+    <span class="lbl">採用台数</span><b id="p-na"></b>
   </div>
-  <h2>計算式（光束法）</h2>
-  <div class="p-formula" id="p-formula"></div>
+  <div class="p-sec">
+    <h2>入力条件</h2>
+    <table class="p-tab" id="p-in"></table>
+  </div>
+  <div class="p-sec">
+    <h2>計算結果</h2>
+    <table class="p-tab" id="p-out"></table>
+  </div>
+  <div class="p-sec">
+    <h2>簡易配置案</h2>
+    <div class="p-plan">
+      <div id="p-svg"></div>
+      <div class="p-plan-t" id="p-plantext"></div>
+    </div>
+  </div>
+  <div class="p-sec">
+    <h2>計算式（光束法）</h2>
+    <div class="p-formula" id="p-formula"></div>
+  </div>
   <div class="p-disc">
     <b>ご利用にあたって</b>
     この計算結果は、光束法による概算の参考値です。
@@ -492,44 +568,51 @@ footer a{text-decoration:none;}
     実際の設計・施工では、器具仕様、配光、取付高さ、天井高さ、反射率、障害物、保守率、利用率、現場条件を確認してください。
     最終判断は設計者・施工者が行ってください。
   </div>
-  <div class="p-foot">照明台数 概算ツール β v0.1.0 ／ TOTE AI TOOLS ／ https://tote-tools.com/lighting-count/</div>
+  <div class="p-foot">照明台数 概算ツール β v0.2.0 ／ TOTE AI TOOLS ／ https://tote-tools.com/lighting-count/</div>
 </div>
 
 <script>
 "use strict";
 
 /* =========================================================
-   照明台数 概算ツール β  v0.1.0
+   照明台数 概算ツール β  v0.2.0
    光束法のみ。逐点法・配光計算・照度分布は扱わない。
    ========================================================= */
 
-var VERSION = "v0.1.0";
+var VERSION = "v0.2.0";
 var MAX_PLAN = 1000;   /* この台数を超えたら配置案の探索を省略 */
 var MAX_DOTS = 600;    /* この点数を超えたら配置図の描画を省略 */
+var WP_DEFAULT = "0.85";  /* 作業面高さ 既定値 (m) */
+/* 判定の目安（間隔 ÷ 判定高さ）。本ツールの目安値であり、規格値ではない。 */
+var PITCH_LO = 0.8;
+var PITCH_HI = 1.5;
+var lastN = null;      /* 直近の計算台数（切り上げ後）。偶数ボタン用 */
 
 var $ = function(id){ return document.getElementById(id); };
 
 var FIELDS = [
-  { k:"w", label:"部屋の幅",   unit:"m",  required:true },
-  { k:"l", label:"部屋の奥行", unit:"m",  required:true },
-  { k:"e", label:"必要照度",   unit:"lx", required:true },
+  { k:"w", label:"部屋の幅",     unit:"m",  required:true },
+  { k:"l", label:"部屋の奥行",   unit:"m",  required:true },
+  { k:"e", label:"必要照度",     unit:"lx", required:true },
   { k:"f", label:"器具の全光束", unit:"lm", required:true },
-  { k:"m", label:"保守率",     unit:"",   required:true, ratio:true },
-  { k:"u", label:"利用率",     unit:"",   required:true, ratio:true },
-  { k:"h", label:"取付高さ",   unit:"m",  required:false }
+  { k:"m", label:"保守率",       unit:"",   required:true, ratio:true },
+  { k:"u", label:"利用率",       unit:"",   required:true, ratio:true },
+  { k:"h", label:"取付高さ",     unit:"m",  required:false },
+  { k:"wp",label:"作業面高さ",   unit:"m",  required:true, zeroOk:true },
+  { k:"n", label:"採用台数",     unit:"台", required:false, int:true }
 ];
 
 var touched = {};
 
 /* ---------------- 数値の読み取り ----------------
    全角数字・全角ピリオド・カンマ・空白のみ正規化する。
-   値そのものの補正（クランプ）は行わない。 */
+   値そのものの補正（クランプ・丸め）は行わない。 */
 function normalize(s){
   return String(s)
-    .replace(/[\uFF10-\uFF19]/g, function(c){ return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
-    .replace(/[\uFF0E\u3002]/g, ".")
-    .replace(/[\uFF0C,\u3001]/g, "")
-    .replace(/[\s\u3000]/g, "");
+    .replace(/[０-９]/g, function(c){ return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
+    .replace(/[．。]/g, ".")
+    .replace(/[，,、]/g, "")
+    .replace(/[\s　]/g, "");
 }
 
 function parseField(spec){
@@ -540,6 +623,13 @@ function parseField(spec){
     if(spec.required) return { ok:false, msg:"入力してください。" };
     return { ok:true, empty:true, v:null };
   }
+  if(spec.int){
+    /* 採用台数は整数のみ。小数を黙って丸めない */
+    if(!/^\d+$/.test(s)) return { ok:false, msg:"整数（台）で入力してください。小数は自動で丸めません。" };
+    var n = Number(s);
+    if(n < 1) return { ok:false, msg:"1 以上の整数を入力してください。" };
+    return { ok:true, empty:false, v:n };
+  }
   if(!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(s)){
     return { ok:false, msg:"数値を入力してください。" };
   }
@@ -547,7 +637,9 @@ function parseField(spec){
   if(!isFinite(v)){
     return { ok:false, msg:"数値を入力してください。" };
   }
-  if(v <= 0){
+  if(spec.zeroOk){
+    if(v < 0) return { ok:false, msg:"0 以上の値を入力してください。" };
+  }else if(v <= 0){
     return { ok:false, msg:"0 より大きい値を入力してください。" };
   }
   if(spec.ratio && v > 1){
@@ -594,20 +686,43 @@ function pickGrid(N, W, L){
   return best;
 }
 
-function pitchComment(g, H){
-  if(!g || H === null) return "";
-  var s = Math.max(g.px, g.py);
-  var r = s / H;
-  if(r > 1.5){
-    return "器具の間隔が取付高さに対して広めです（間隔 ÷ 取付高さ ＝ " + num(r,2) +
+/* 配置の間隔・壁距離の表示。
+   列数（行数）が1の方向は「ピッチ」ではなく「壁から器具中心まで（＝寸法÷2）」と書く。 */
+function spacingText(g, W, L){
+  var a = (g.cols > 1)
+    ? "幅方向 ピッチ " + num(g.px,2) + " m"
+    : "幅方向 壁から器具中心まで " + num(W/2,2) + " m（1列）";
+  var b = (g.rows > 1)
+    ? "奥行方向 ピッチ " + num(g.py,2) + " m"
+    : "奥行方向 壁から器具中心まで " + num(L/2,2) + " m（1列）";
+  return a + " ／ " + b;
+}
+
+/* 間隔 ÷ 判定高さ。器具がある方向（列・行が2以上）のピッチのうち大きい方を使う。
+   判定できない（器具1台、または判定高さなし）のときは null。 */
+function judgeRatio(g, Hj){
+  if(!g || Hj === null) return null;
+  var cand = [];
+  if(g.cols > 1) cand.push(g.px);
+  if(g.rows > 1) cand.push(g.py);
+  if(!cand.length) return null;
+  return Math.max.apply(null, cand) / Hj;
+}
+
+function pitchComment(g, Hj, stop, ratio){
+  if(stop) return "取付高さが作業面以下です。間隔と取付高さの判定は止めています。";
+  if(!g || Hj === null) return "";
+  if(ratio === null) return "器具が1台のため、間隔と取付高さの判定は行いません。";
+  if(ratio > PITCH_HI){
+    return "器具の間隔が取付高さに対して広めです（間隔 ÷ 判定高さ ＝ " + num(ratio,2) +
            "）。明るさのムラが出やすくなる可能性があります。";
   }
-  if(r < 0.8){
-    return "器具の間隔が取付高さに対して狭めです（間隔 ÷ 取付高さ ＝ " + num(r,2) +
+  if(ratio < PITCH_LO){
+    return "器具の間隔が取付高さに対して狭めです（間隔 ÷ 判定高さ ＝ " + num(ratio,2) +
            "）。器具の配光によっては台数が多めになっている可能性があります。";
   }
-  return "器具の間隔と取付高さの関係は、一般的な範囲に収まっています（間隔 ÷ 取付高さ ＝ " +
-         num(r,2) + "）。あくまで目安です。";
+  return "器具の間隔と判定高さの関係は、目安の範囲（" + num(PITCH_LO,1) + "〜" + num(PITCH_HI,1) +
+         "）に収まっています（間隔 ÷ 判定高さ ＝ " + num(ratio,2) + "）。あくまで目安です。";
 }
 
 /* ---------------- 配置図（SVG） ---------------- */
@@ -666,6 +781,21 @@ function render(){
     }
   });
 
+  /* A-5：判定に使う高さ Hj ＝ 取付高さ − 作業面高さ。
+     0 以下なら判定を止めて知らせる（値は黙って補正しない）。計算自体は続ける。 */
+  var judgeStop = false, Hj = null;
+  if(vals.h !== null && vals.wp !== null){
+    Hj = vals.h - vals.wp;
+    if(Hj <= 0){
+      judgeStop = true;
+      Hj = null;
+      $("f-h").classList.add("bad");
+      $("e-h").textContent = "取付高さが作業面以下です（取付高さ " + num(vals.h,2) +
+        " m ／ 作業面高さ " + num(vals.wp,2) + " m）。間隔の判定を止めています。";
+      $("i-h").setAttribute("aria-invalid", "true");
+    }
+  }
+
   syncPresets(vals);
 
   if(!allOk){
@@ -674,69 +804,96 @@ function render(){
   }
 
   /* ---- 計算 ---- */
-  var W = vals.w, L = vals.l, E = vals.e, F = vals.f, M = vals.m, U = vals.u, H = vals.h;
+  var W = vals.w, L = vals.l, E = vals.e, F = vals.f, M = vals.m, U = vals.u;
+  var H = vals.h, WP = vals.wp, AD = vals.n;
   var A     = W * L;
   var Freq  = A * E;
   var Feff  = F * M * U;
   var Nraw  = Freq / Feff;
   var N     = Math.ceil(Nraw);
-  var Eeff  = N * Feff / A;
-  var perFx = A / N;
 
   if(!isFinite(N) || N < 1){
     showEmpty();
     return;
   }
 
+  var Nuse  = (AD !== null) ? AD : N;   /* 採用台数（未入力なら計算台数） */
+  var Eeff  = Nuse * Feff / A;
+  var perFx = A / Nuse;
+  var K     = (H !== null && Hj !== null) ? (W * L) / (Hj * (W + L)) : null;
+
   var warns = [];
+  if(Nuse < N){
+    warns.push("採用台数が計算台数を下回っています。実効照度 " + num(Eeff,0) +
+      " lx は必要照度 " + num(E,0) + " lx " + (Eeff < E ? "未満です。" : "以上です。"));
+  }
   if(A > 5000){
     warns.push("床面積が 5,000 m² を超えています。この規模は概算の適用範囲外です。区画を分割して検討してください。");
   }
-  if(N > 500){
-    warns.push("概算台数が 500 台を超えています。この規模は概算の適用範囲外です。区画を分割して検討してください。");
+  if(Nuse > 500){
+    warns.push("台数が 500 台を超えています。この規模は概算の適用範囲外です。区画を分割して検討してください。");
   }
 
   var g = null;
-  if(N <= MAX_PLAN){
-    g = pickGrid(N, W, L);
-    if(g) g.n = N;
+  if(Nuse <= MAX_PLAN){
+    g = pickGrid(Nuse, W, L);
+    if(g) g.n = Nuse;
   }
 
-  paint({ W:W, L:L, E:E, F:F, M:M, U:U, H:H, A:A, Freq:Freq, Feff:Feff,
-          Nraw:Nraw, N:N, Eeff:Eeff, perFx:perFx, g:g, warns:warns });
+  lastN = N;
+  $("btn-even").disabled = false;
+
+  paint({ W:W, L:L, E:E, F:F, M:M, U:U, H:H, WP:WP, Hj:Hj, judgeStop:judgeStop, K:K,
+          A:A, Freq:Freq, Feff:Feff, Nraw:Nraw, N:N, Nuse:Nuse, adopted:(AD !== null),
+          Eeff:Eeff, perFx:perFx, g:g, warns:warns });
 }
 
 function showEmpty(){
   var started = false;
   for(var k in touched){ if(touched[k]){ started = true; break; } }
   $("resultBody").innerHTML = '<div class="empty">' + (started
-    ? "入力を確認してください。すべての必須項目に 0 より大きい数値が入ると、概算台数が出ます。"
+    ? "入力を確認してください。すべての必須項目に正しい値が入ると、概算台数が出ます。"
     : "寸法・必要照度・器具の全光束を入力すると、概算台数が出ます。") + '</div>';
   $("copyCard").hidden = true;
   $("copyText").value = "";
   $("copyMsg").textContent = "";
   $("p-n").textContent = "";
+  $("p-na").textContent = "";
+  lastN = null;
+  $("btn-even").disabled = true;
 }
 
 function paint(r){
-  var planText, planFig = "", pitchTxt = "—";
+  var planText, planFig = "", spacing = "—";
   if(r.g){
     planText = "横 " + r.g.cols + " 列 × 縦 " + r.g.rows + " 列";
     if(r.g.waste > 0) planText += "（格子 " + (r.g.cols * r.g.rows) + " 箇所のうち " + r.g.n + " 箇所に配置）";
-    pitchTxt = "幅方向 " + num(r.g.px,2) + " m ／ 奥行方向 " + num(r.g.py,2) + " m";
+    spacing = spacingText(r.g, r.W, r.L);
     planFig = planSVG(r.g, r.W, r.L);
   }else{
     planText = "台数が多いため、配置案は省略しています。";
   }
 
-  var comment = r.g ? pitchComment(r.g, r.H) : "";
+  var ratio = r.g ? judgeRatio(r.g, r.Hj) : null;
+  var comment = r.g ? pitchComment(r.g, r.Hj, r.judgeStop, ratio) : (r.judgeStop ? pitchComment(null, null, true, null) : "");
+  var info = { planText:planText, spacing:spacing, comment:comment, ratio:ratio, planFig:planFig };
 
   var html = "";
 
-  html += '<div class="hero">' +
-    '<div class="cap">概算必要台数</div>' +
-    '<span class="num">' + num(r.N,0) + '<span class="u">台</span></span>' +
-    '<div class="sub">光束法による概算の参考値です</div></div>';
+  /* 計算台数（切り上げ前／後）と採用台数を並べて表示 */
+  html += '<div class="hero"><div class="hero-row">' +
+    '<div class="hcell"><div class="cap">計算台数（切り上げ後）</div>' +
+      '<span class="num">' + num(r.N,0) + '<span class="u">台</span></span>' +
+      '<div class="sub">切り上げ前 ' + num(r.Nraw,2) + ' 台</div></div>' +
+    '<div class="hcell"><div class="cap">採用台数</div>' +
+      '<span class="num">' + num(r.Nuse,0) + '<span class="u">台</span></span>' +
+      '<div class="sub">' + (r.adopted ? "入力された採用台数で計算" : "未入力のため計算台数と同じ") + '</div></div>' +
+    '</div>' +
+    '<div class="sub" style="margin-top:10px">光束法による概算の参考値です</div></div>';
+
+  r.warns.forEach(function(w){
+    html += '<div class="note warn">' + esc(w) + '</div>';
+  });
 
   html += '<ul class="ladder">' +
     '<li><span class="k">面積</span><span class="v">' + num(r.A,2) + ' m²</span>' +
@@ -745,13 +902,14 @@ function paint(r){
       '<span class="f">' + num(r.A,2) + ' m² × ' + num(r.E,0) + ' lx</span></li>' +
     '<li><span class="k">有効光束 / 台</span><span class="v">' + num(r.Feff,0) + ' lm</span>' +
       '<span class="f">' + num(r.F,0) + ' lm × 保守率 ' + num(r.M,2) + ' × 利用率 ' + num(r.U,2) + '</span></li>' +
-    '<li><span class="k">切上げ前の必要台数</span><span class="v">' + num(r.Nraw,2) + ' 台</span>' +
+    '<li><span class="k">切上げ前の計算台数</span><span class="v">' + num(r.Nraw,2) + ' 台</span>' +
       '<span class="f">' + num(r.Freq,0) + ' lm ÷ ' + num(r.Feff,0) + ' lm</span></li>' +
-    '<li><span class="k">概算必要台数</span><span class="v">' + num(r.N,0) + ' 台</span>' +
+    '<li><span class="k">計算台数（切上げ後）</span><span class="v">' + num(r.N,0) + ' 台</span>' +
       '<span class="f">切り上げ</span></li>' +
     '</ul>';
 
   html += '<div class="pairs">' +
+    pair("採用台数", num(r.Nuse,0) + " 台") +
     pair("実効平均照度", num(r.Eeff,0) + " lx") +
     pair("1台あたりの受け持ち面積", num(r.perFx,2) + " m²") +
     pair("必要照度", num(r.E,0) + " lx") +
@@ -759,6 +917,9 @@ function paint(r){
     pair("保守率 M", num(r.M,2)) +
     pair("利用率 U", num(r.U,2)) +
     (r.H !== null ? pair("取付高さ", num(r.H,2) + " m") : "") +
+    pair("作業面高さ", num(r.WP,2) + " m") +
+    (r.Hj !== null ? pair("判定に使う高さ", num(r.Hj,2) + " m（取付高さ − 作業面高さ）") : "") +
+    (r.K !== null ? pair("室指数 K（参考）", "≒ " + num(r.K,2)) : "") +
     '</div>';
 
   html += '<h2 style="font-size:12.5px;letter-spacing:.14em;font-weight:700;color:var(--text-2);' +
@@ -766,28 +927,32 @@ function paint(r){
           'background:var(--panel-2)">簡易配置案</h2>';
   if(planFig){
     html += '<div class="plan-fig">' + planFig + '</div>' +
-            '<div class="figcap">幅 ' + num(r.W,2) + ' m × 奥行 ' + num(r.L,2) + ' m ／ 等分割の格子で配置した参考図</div>';
+            '<div class="figcap">幅 ' + num(r.W,2) + ' m × 奥行 ' + num(r.L,2) + ' m ／ 採用台数で等分割した格子の参考図</div>';
   }
   html += '<div class="pairs" style="padding-top:12px">' +
     pair("配置案", planText) +
-    pair("配置ピッチ目安", pitchTxt) +
+    pair("間隔・壁からの距離", spacing) +
+    (ratio !== null ? pair("間隔 ÷ 判定高さ（目安 " + num(PITCH_LO,1) + "〜" + num(PITCH_HI,1) + "）", num(ratio,2)) : "") +
     '</div>';
 
   if(comment){
-    html += '<div class="note">' + esc(comment) + '</div>';
+    html += '<div class="note' + (r.judgeStop ? ' stop' : '') + '">' + esc(comment) + '</div>';
+  }
+  if(ratio !== null){
+    html += '<div class="note">判定のしきい値は本ツールの目安（' + num(PITCH_LO,1) + '〜' + num(PITCH_HI,1) +
+            '）です。器具メーカーの推奨値があればそちらを優先してください。</div>';
+  }
+  if(r.K !== null){
+    html += '<div class="note">室指数が小さい（細長い・天井が高い・狭い）ほど利用率は下がります。器具メーカーの照明率表で確認してください。</div>';
   }
   html += '<div class="note">配置案は縦横を等分割しただけの参考図です。開口・障害物・什器・機器配置・器具の配光は考慮していません。</div>';
-
-  r.warns.forEach(function(w){
-    html += '<div class="note warn">' + esc(w) + '</div>';
-  });
 
   html += '<div style="height:16px"></div>';
 
   $("resultBody").innerHTML = html;
 
-  buildCopyText(r, planText, pitchTxt, comment);
-  buildPrint(r, planText, pitchTxt, comment, planFig);
+  buildCopyText(r, info);
+  buildPrint(r, info);
   $("copyCard").hidden = false;
   $("copyMsg").textContent = "";
 }
@@ -797,7 +962,7 @@ function pair(k, v){
 }
 
 /* ---------------- コピー用テキスト ---------------- */
-function buildCopyText(r, planText, pitchTxt, comment){
+function buildCopyText(r, info){
   var L = [];
   L.push("■ 照明台数 概算結果（光束法・概算検討用）");
   L.push("作成日：" + today());
@@ -810,27 +975,35 @@ function buildCopyText(r, planText, pitchTxt, comment){
   L.push("保守率 M              " + num(r.M,2));
   L.push("利用率 U              " + num(r.U,2));
   if(r.H !== null) L.push("取付高さ              " + num(r.H,2) + " m");
+  L.push("作業面高さ            " + num(r.WP,2) + " m");
+  L.push("");
+  L.push("【計算台数・採用台数】");
+  L.push("計算台数（切上げ前）  " + num(r.Nraw,2) + " 台");
+  L.push("計算台数（切上げ後）  " + num(r.N,0) + " 台");
+  L.push("採用台数              " + num(r.Nuse,0) + " 台" + (r.adopted ? "" : "（未入力のため計算台数を使用）"));
   L.push("");
   L.push("【計算結果】");
   L.push("面積                  " + num(r.A,2) + " m²");
   L.push("必要光束              " + num(r.Freq,0) + " lm");
   L.push("有効光束/台           " + num(r.Feff,0) + " lm");
-  L.push("切上げ前の必要台数    " + num(r.Nraw,2) + " 台");
-  L.push("概算必要台数          " + num(r.N,0) + " 台");
   L.push("実効平均照度          " + num(r.Eeff,0) + " lx");
   L.push("1台あたり受け持ち面積 " + num(r.perFx,2) + " m²");
+  if(r.Hj !== null) L.push("判定に使う高さ        " + num(r.Hj,2) + " m（取付高さ − 作業面高さ）");
+  if(info.ratio !== null) L.push("間隔 ÷ 判定高さ       " + num(info.ratio,2) + "（目安 " + num(PITCH_LO,1) + "〜" + num(PITCH_HI,1) + "）");
+  if(r.K !== null) L.push("室指数 K（参考）      " + num(r.K,2));
   L.push("");
   L.push("【簡易配置案】");
-  L.push("配置案                " + planText);
-  L.push("配置ピッチ目安        " + pitchTxt);
-  if(comment) L.push("参考                  " + comment);
+  L.push("配置案                " + info.planText);
+  L.push("間隔・壁からの距離    " + info.spacing);
+  if(info.comment) L.push("参考                  " + info.comment);
   L.push("");
   L.push("【計算式（光束法）】");
   L.push("面積        = 幅 × 奥行");
   L.push("必要光束    = 面積 × 必要照度");
   L.push("有効光束/台 = 器具光束 × 保守率 × 利用率");
-  L.push("必要台数    = 必要光束 ÷ 有効光束/台 を切り上げ");
-  L.push("実効平均照度 = 台数 × 有効光束/台 ÷ 面積");
+  L.push("計算台数    = 必要光束 ÷ 有効光束/台 を切り上げ");
+  L.push("採用台数    = 入力があればその値、なければ計算台数");
+  L.push("実効平均照度 = 採用台数 × 有効光束/台 ÷ 面積");
   L.push("");
   r.warns.forEach(function(w){ L.push("※ " + w); });
   if(r.warns.length) L.push("");
@@ -847,9 +1020,10 @@ function buildCopyText(r, planText, pitchTxt, comment){
 }
 
 /* ---------------- 印刷用 ---------------- */
-function buildPrint(r, planText, pitchTxt, comment, planFig){
+function buildPrint(r, info){
   $("p-meta").innerHTML = "作成日：" + today() + "<br>照明台数 概算ツール β " + VERSION;
   $("p-n").textContent = num(r.N,0) + " 台";
+  $("p-na").textContent = num(r.Nuse,0) + " 台" + (r.adopted ? "" : "（計算台数と同じ）");
 
   var rows = "";
   function tr(k, v){ rows += "<tr><th>" + esc(k) + "</th><td>" + esc(v) + "</td></tr>"; }
@@ -861,21 +1035,26 @@ function buildPrint(r, planText, pitchTxt, comment, planFig){
   tr("保守率 M", num(r.M,2));
   tr("利用率 U", num(r.U,2));
   if(r.H !== null) tr("取付高さ", num(r.H,2) + " m");
+  tr("作業面高さ", num(r.WP,2) + " m");
   $("p-in").innerHTML = rows;
 
   rows = "";
   tr("面積", num(r.A,2) + " m²");
   tr("必要光束", num(r.Freq,0) + " lm");
   tr("有効光束 / 台", num(r.Feff,0) + " lm");
-  tr("切上げ前の必要台数", num(r.Nraw,2) + " 台");
-  tr("概算必要台数", num(r.N,0) + " 台");
+  tr("計算台数（切上げ前）", num(r.Nraw,2) + " 台");
+  tr("計算台数（切上げ後）", num(r.N,0) + " 台");
+  tr("採用台数", num(r.Nuse,0) + " 台" + (r.adopted ? "" : "（計算台数と同じ）"));
   tr("実効平均照度", num(r.Eeff,0) + " lx");
   tr("1台あたりの受け持ち面積", num(r.perFx,2) + " m²");
+  if(r.Hj !== null) tr("判定に使う高さ", num(r.Hj,2) + " m（取付高さ − 作業面高さ）");
+  if(info.ratio !== null) tr("間隔 ÷ 判定高さ", num(info.ratio,2) + "（目安 " + num(PITCH_LO,1) + "〜" + num(PITCH_HI,1) + "）");
+  if(r.K !== null) tr("室指数 K（参考）", num(r.K,2));
   $("p-out").innerHTML = rows;
 
-  $("p-svg").innerHTML = planFig;
-  var pt = "<p><b>配置案：</b>" + esc(planText) + "</p><p><b>配置ピッチ目安：</b>" + esc(pitchTxt) + "</p>";
-  if(comment) pt += "<p>" + esc(comment) + "</p>";
+  $("p-svg").innerHTML = info.planFig;
+  var pt = "<p><b>配置案：</b>" + esc(info.planText) + "</p><p><b>間隔・壁からの距離：</b>" + esc(info.spacing) + "</p>";
+  if(info.comment) pt += "<p>" + esc(info.comment) + "</p>";
   pt += "<p>配置案は縦横を等分割しただけの参考図です。開口・障害物・什器・機器配置・器具の配光は考慮していません。</p>";
   r.warns.forEach(function(w){ pt += "<p><b>※ </b>" + esc(w) + "</p>"; });
   $("p-plantext").innerHTML = pt;
@@ -884,8 +1063,10 @@ function buildPrint(r, planText, pitchTxt, comment, planFig){
     "面積        = 幅 × 奥行\n" +
     "必要光束    = 面積 × 必要照度\n" +
     "有効光束/台 = 器具光束 × 保守率 × 利用率\n" +
-    "必要台数    = 必要光束 ÷ 有効光束/台 を切り上げ\n" +
-    "実効平均照度 = 台数 × 有効光束/台 ÷ 面積";
+    "計算台数    = 必要光束 ÷ 有効光束/台 を切り上げ\n" +
+    "採用台数    = 入力があればその値、なければ計算台数\n" +
+    "実効平均照度 = 採用台数 × 有効光束/台 ÷ 面積\n" +
+    "判定高さ    = 取付高さ − 作業面高さ（間隔の判定用）";
 }
 
 /* ---------------- プリセット ---------------- */
@@ -915,10 +1096,19 @@ document.querySelectorAll(".preset").forEach(function(b){
   });
 });
 
+/* 採用台数の補助：計算台数を偶数に切り上げた値を欄に入れるだけ（自動では入れない） */
+$("btn-even").addEventListener("click", function(){
+  if(lastN === null) return;
+  $("i-n").value = String(lastN % 2 === 1 ? lastN + 1 : lastN);
+  touched.n = true;
+  render();
+});
+
 $("btn-reset").addEventListener("click", function(){
-  ["w","l","e","f","h"].forEach(function(k){ $("i-" + k).value = ""; });
+  ["w","l","e","f","h","n"].forEach(function(k){ $("i-" + k).value = ""; });
   $("i-m").value = "0.8";
   $("i-u").value = "0.6";
+  $("i-wp").value = WP_DEFAULT;
   touched = {};
   render();
   $("i-w").focus();
@@ -951,6 +1141,7 @@ function legacyCopy(ta, done, fail){
 
 $("btn-print").addEventListener("click", function(){ window.print(); });
 
+$("btn-even").disabled = true;
 render();
 </script>
 </body>
